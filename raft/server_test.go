@@ -45,10 +45,27 @@ func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
 	s.term = 2
 	resp := s.RequestVote(newRequestVoteRequest(2, "foo", 1, 0))
 	if resp.Term != 2 || !resp.VoteGranted {
-		t.Fatalf("First vote should not have been denied")
+		t.Fatalf("First vote should not be denied")
 	}
 	resp = s.RequestVote(newRequestVoteRequest(2, "bar", 1, 0))
 	if resp.Term != 2 || resp.VoteGranted {
 		t.Fatalf("Second vote should be denied")
+	}
+}
+
+func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
+	s := NewServer("test")
+	defer s.stop()
+	s.mutex.Lock()
+	s.term = 2
+	s.mutex.Unlock()
+
+	resp := s.RequestVote(newRequestVoteRequest(2, "foo", 1, 0))
+	if resp.Term != 2 || !resp.VoteGranted {
+		t.Fatalf("First vote should not be denied")
+	}
+	resp = s.RequestVote(newRequestVoteRequest(3, "bar", 1, 0))
+	if resp.Term != 3 || !resp.VoteGranted || s.votedFor != "bar" {
+		t.Fatalf("Second vote should not be denied")
 	}
 }

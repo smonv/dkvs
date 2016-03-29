@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sync"
 )
 
 // Raft server state
@@ -23,6 +24,7 @@ type Server struct {
 	rpcCh      chan *RPC
 	shutdownCh chan bool
 	logger     *log.Logger
+	mutex      sync.RWMutex
 }
 
 // Term is used to get current term of server
@@ -31,7 +33,9 @@ func (s *Server) Term() uint64 {
 }
 
 func (s *Server) setTerm(newTerm uint64) {
+	s.mutex.Lock()
 	s.term = newTerm
+	s.mutex.Unlock()
 }
 
 // State is used to get current state of server
@@ -118,13 +122,13 @@ func (s *Server) processRequestVote(req *RequestVoteRequest) (*RequestVoteRespon
 	if req.Term > s.Term() {
 		s.setTerm(req.Term)
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
-		s.logger.Print("server.deny.vote: duplicate vote: ", req.CandidateName, " already voted for: ", s.votedFor)
 		return resp, false
 	}
 
 	// If everything ok then vote
 	s.votedFor = req.CandidateName
 	resp.VoteGranted = true
+	resp.Term = s.Term()
 	return resp, true
 }
 
