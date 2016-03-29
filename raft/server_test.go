@@ -2,6 +2,7 @@ package raft
 
 import (
 	"testing"
+	"time"
 )
 
 func TestNewServerStartAsFollower(t *testing.T) {
@@ -67,5 +68,15 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 	resp = s.RequestVote(newRequestVoteRequest(3, "bar", 1, 0))
 	if resp.Term != 3 || !resp.VoteGranted || s.votedFor != "bar" {
 		t.Fatalf("Second vote should not be denied")
+	}
+}
+
+func TestServerPromoteToCandidate(t *testing.T) {
+	s := NewServer("test")
+	defer s.stop()
+
+	time.Sleep(350 * time.Millisecond)
+	if s.State() != Candidate {
+		t.Fatalf("Server not promote to candidate")
 	}
 }

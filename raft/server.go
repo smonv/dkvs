@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"sync"
+	"time"
 )
 
 // Raft server state
@@ -14,9 +15,17 @@ const (
 	Leader
 )
 
+const (
+	// DefaultHeartbeatInterval is the interval that the leader will send
+	// AppendEntriesRequests to followers to maintain leadership.
+	DefaultHeartbeatInterval = 50 * time.Millisecond
+
+	DefaultElectionTimeout = 150 * time.Millisecond
+)
+
 // Server is provide Raft server information
 type Server struct {
-	id         string
+	name       string
 	term       uint64
 	state      uint8
 	votedFor   string
@@ -48,16 +57,16 @@ func (s *Server) setState(newState uint8) {
 }
 
 // NewServer is used to create new Raft server
-func NewServer(id string) *Server {
+func NewServer(name string) *Server {
 	s := &Server{
-		id:         id,
+		name:       name,
 		term:       0,
 		state:      Follower,
 		votedFor:   "",
 		logs:       []string{},
 		rpcCh:      make(chan *RPC),
 		shutdownCh: make(chan bool),
-		logger:     log.New(os.Stdout, "[raft]", log.Lmicroseconds),
+		logger:     log.New(os.Stdout, "[raft] ", log.Lmicroseconds),
 	}
 	go s.run()
 	return s
@@ -80,16 +89,55 @@ func (s *Server) run() {
 		case Follower:
 			s.runAsFollower()
 		case Candidate:
+			s.runAsCandidate()
 		case Leader:
+			s.runAsLeader()
 		}
 	}
 }
 
 func (s *Server) runAsFollower() {
+	electionTimeout := timeoutBetween(DefaultElectionTimeout)
 	for s.State() == Follower {
 		select {
 		case rpc := <-s.rpcCh:
+			electionTimeout = timeoutBetween(DefaultElectionTimeout)
 			s.processRPC(rpc)
+		case <-electionTimeout:
+			s.setState(Candidate)
+		case <-s.shutdownCh:
+			return
+		}
+	}
+}
+
+func (s *Server) runAsCandidate() {
+	doVote := true
+	votesGranted := 0
+	var electionTimeout <-chan time.Time
+	for s.State() == Candidate {
+		if doVote {
+			s.term++
+			s.votedFor = s.name
+			votesGranted = 1
+			electionTimeout = timeoutBetween(DefaultElectionTimeout)
+			doVote = false
+		}
+
+		if votesGranted == 1 {
+			s.setState(Leader)
+			return
+		}
+		select {
+		case <-s.shutdownCh:
+			return
+		}
+	}
+}
+
+func (s *Server) runAsLeader() {
+	for s.State() == Leader {
+		select {
 		case <-s.shutdownCh:
 			return
 		}
