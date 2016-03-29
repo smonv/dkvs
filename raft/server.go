@@ -1,6 +1,10 @@
 package raft
 
-import "fmt"
+import (
+	"fmt"
+	"log"
+	"os"
+)
 
 // Raft server state
 const (
@@ -18,6 +22,7 @@ type Server struct {
 	logs       []string
 	rpcCh      chan *RPC
 	shutdownCh chan bool
+	logger     *log.Logger
 }
 
 // Term is used to get current term of server
@@ -48,15 +53,21 @@ func NewServer(id string) *Server {
 		logs:       []string{},
 		rpcCh:      make(chan *RPC),
 		shutdownCh: make(chan bool),
+		logger:     log.New(os.Stdout, "[raft]", log.Lmicroseconds),
 	}
 	go s.run()
 	return s
+}
+
+func (s *Server) stop() {
+	s.shutdownCh <- true
 }
 
 func (s *Server) run() {
 	for {
 		select {
 		case <-s.shutdownCh:
+			close(s.shutdownCh)
 			return
 		default:
 		}
@@ -85,22 +96,36 @@ func (s *Server) processRPC(rpc *RPC) {
 	var err error
 	switch cmd := rpc.Request.(type) {
 	case *RequestVoteRequest:
-		resp := s.processRequestVote(cmd)
+		resp, _ := s.processRequestVote(cmd)
 		rpc.Response = resp
 	default:
 	}
 	rpc.err <- err
 }
 
-func (s *Server) processRequestVote(req *RequestVoteRequest) *RequestVoteResponse {
+func (s *Server) processRequestVote(req *RequestVoteRequest) (*RequestVoteResponse, bool) {
 	resp := &RequestVoteResponse{
 		Term:        s.Term(),
 		VoteGranted: false,
 	}
-	if req.Term > s.Term() {
-		resp.VoteGranted = true
+	// If term of request smaller than current term, reject
+	if req.Term < s.Term() {
+		return resp, false
 	}
-	return resp
+	// If term of request larger than current term, update current term
+	// If term is equal but already voted for different candidate then
+	// don't vote for this candidate
+	if req.Term > s.Term() {
+		s.setTerm(req.Term)
+	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
+		s.logger.Print("server.deny.vote: duplicate vote: ", req.CandidateName, " already voted for: ", s.votedFor)
+		return resp, false
+	}
+
+	// If everything ok then vote
+	s.votedFor = req.CandidateName
+	resp.VoteGranted = true
+	return resp, true
 }
 
 func (s *Server) send(command interface{}) (interface{}, error) {
