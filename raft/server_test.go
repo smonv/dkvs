@@ -1,21 +1,28 @@
 package raft
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
 
-func TestNewServerStartAsFollower(t *testing.T) {
-	s := NewServer("test")
-	defer s.Stop()
+const (
+	testElectionTimeout = 200 * time.Millisecond
+)
 
+func TestNewServerStartAsFollower(t *testing.T) {
+	s := NewServer("test", &testTransporter{})
+	s.Start()
+	defer s.Stop()
+	fmt.Println(s.State())
 	if s.State() != Follower {
 		t.Errorf("Server not start as follower")
 	}
 }
 
 func TestServerRequestVote(t *testing.T) {
-	s := NewServer("test")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	defer s.Stop()
 
 	resp := s.RequestVote(newRequestVoteRequest(1, "foo", 1, 0))
@@ -25,7 +32,8 @@ func TestServerRequestVote(t *testing.T) {
 }
 
 func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
-	s := NewServer("test")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	defer s.Stop()
 
 	s.currentTerm = 2
@@ -39,7 +47,8 @@ func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
 }
 
 func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
-	s := NewServer("test")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	defer s.Stop()
 
 	s.currentTerm = 2
@@ -54,7 +63,8 @@ func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
 }
 
 func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
-	s := NewServer("test")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	defer s.Stop()
 
 	s.mutex.Lock()
@@ -72,7 +82,8 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 }
 
 func TestProcessRequestVoteResponse(t *testing.T) {
-	s := NewServer("t")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	s.currentTerm = 0
 
 	resp := &RequestVoteResponse{
@@ -102,11 +113,36 @@ func TestProcessRequestVoteResponse(t *testing.T) {
 }
 
 func TestServerSelfPromoteToLeader(t *testing.T) {
-	s := NewServer("test")
+	s := NewServer("test", &testTransporter{})
+	s.Start()
 	defer s.Stop()
 
 	time.Sleep(2 * DefaultElectionTimeout)
 	if s.State() != Leader {
 		t.Fatalf("Server not promote to leader")
+	}
+}
+
+func TestServerPromote(t *testing.T) {
+	servers := map[string]*Server{}
+	transporter := &testTransporter{}
+	transporter.sendVoteRequestFunc = func(server *Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
+		return servers[peer.Name].RequestVote(req)
+	}
+
+	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transporter, servers)
+
+	for _, s := range cluster {
+		s.Start()
+	}
+
+	defer func() {
+		for _, s := range cluster {
+			s.Stop()
+		}
+	}()
+	time.Sleep(2 * testElectionTimeout)
+	if cluster[0].State() != Leader && cluster[1].State() != Leader && cluster[2].State() != Leader {
+		t.Fatalf("No leader elected")
 	}
 }

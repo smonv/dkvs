@@ -13,6 +13,7 @@ const (
 	Follower = iota
 	Candidate
 	Leader
+	Stopped
 )
 
 const (
@@ -41,27 +42,45 @@ type Server struct {
 }
 
 // NewServer is used to create new Raft server
-func NewServer(name string) *Server {
+func NewServer(name string, transporter Transporter) *Server {
 	s := &Server{
 		name:        name,
 		currentTerm: 0,
-		state:       Follower,
+		state:       Stopped,
 		votedFor:    "",
 		logs:        []string{},
 		rpcCh:       make(chan *RPC),
-		stopCh:      make(chan bool),
+		transporter: transporter,
+		peers:       make(map[string]*Peer),
 		logger:      log.New(os.Stdout, "[raft] ", log.Lmicroseconds),
 	}
-	go s.Start()
+
 	return s
 }
 
 // Start is used to start raft server
 func (s *Server) Start() {
-	for {
+	s.stopCh = make(chan bool)
+	s.setState(Follower)
+	go s.run()
+}
+
+// Stop is used to stop raft server
+func (s *Server) Stop() {
+	if s.State() == Stopped {
+		return
+	}
+	close(s.stopCh)
+	s.setState(Stopped)
+	return
+}
+
+func (s *Server) run() {
+	state := s.State()
+	for state != Stopped {
 		select {
 		case <-s.stopCh:
-			close(s.stopCh)
+			s.setState(Stopped)
 			return
 		default:
 		}
@@ -74,12 +93,8 @@ func (s *Server) Start() {
 		case Leader:
 			s.runAsLeader()
 		}
+		state = s.State()
 	}
-}
-
-// Stop is used to stop raft server
-func (s *Server) Stop() {
-	s.stopCh <- true
 }
 
 func (s *Server) runAsFollower() {
@@ -92,6 +107,7 @@ func (s *Server) runAsFollower() {
 		case <-electionTimeout:
 			s.setState(Candidate)
 		case <-s.stopCh:
+			s.setState(Stopped)
 			return
 		}
 	}
@@ -107,7 +123,7 @@ func (s *Server) runAsCandidate() {
 		if doVote {
 			s.currentTerm++
 			s.votedFor = s.name
-			respCh := make(chan *RequestVoteResponse, len(s.peers))
+			respCh = make(chan *RequestVoteResponse, len(s.peers))
 			for _, peer := range s.peers {
 				go func(peer *Peer) {
 					peer.sendVoteRequest(newRequestVoteRequest(s.currentTerm, s.name, 1, 0), respCh)
@@ -117,7 +133,6 @@ func (s *Server) runAsCandidate() {
 			electionTimeout = timeoutBetween(DefaultElectionTimeout)
 			doVote = false
 		}
-
 		// If receive enough vote, stop waiting and promote to leader
 		if votesGranted == s.QuorumSize() {
 			s.setState(Leader)
@@ -126,12 +141,12 @@ func (s *Server) runAsCandidate() {
 
 		select {
 		case <-s.stopCh:
+			s.setState(Stopped)
 			return
 		case resp := <-respCh:
 			if success := s.processRequestVoteResponse(resp); success {
 				votesGranted++
 			}
-			return
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
 		case <-electionTimeout:
@@ -200,6 +215,8 @@ func (s *Server) processRequestVote(req *RequestVoteRequest) (*RequestVoteRespon
 	if req.Term > s.Term() {
 		s.setTerm(req.Term)
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
+		s.logger.Println("server.deny.vote: cause duplicate vote: "+req.CandidateName,
+			" already vote for: "+s.votedFor)
 		return resp, false
 	}
 
@@ -257,4 +274,20 @@ func (s *Server) MemberCount() int {
 // QuorumSize is used to get number of major server
 func (s *Server) QuorumSize() int {
 	return (s.MemberCount() / 2) + 1
+}
+
+func (s *Server) AddPeer(name string, connectionString string) error {
+	if s.peers[name] != nil {
+		return nil
+	}
+
+	if s.name != name {
+		peer := &Peer{
+			server:           s,
+			Name:             name,
+			ConnectionString: connectionString,
+		}
+		s.peers[name] = peer
+	}
+	return nil
 }
