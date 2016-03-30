@@ -2,6 +2,7 @@ package raft
 
 // RequestVoteRequest is used to make request vote message
 type RequestVoteRequest struct {
+	peer          *Peer
 	Term          uint64
 	CandidateName string
 	LastLogIndex  uint64
@@ -10,6 +11,7 @@ type RequestVoteRequest struct {
 
 // RequestVoteResponse is used to make response message of request vote
 type RequestVoteResponse struct {
+	peer        *Peer
 	Term        uint64
 	VoteGranted bool
 }
