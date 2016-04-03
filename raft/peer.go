@@ -7,10 +7,10 @@ type Peer struct {
 	ConnectionString string
 }
 
-func (p *Peer) sendVoteRequest(req *RequestVoteRequest, c chan *RequestVoteResponse) {
-	req.peer = p
-	if resp := p.server.Transporter().SendVoteRequest(p.server, p, req); resp != nil {
-		resp.peer = p
-		c <- resp
-	}
-}
+// func (p *Peer) sendVoteRequest(req *RequestVoteRequest, c chan *RequestVoteResponse) {
+// 	req.peer = p
+// 	if resp := p.server.Transporter().SendVoteRequest(p.server, p, req); resp != nil {
+// 		resp.peer = p
+// 		c <- resp
+// 	}
+// }

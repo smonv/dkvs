@@ -1,5 +1,5 @@
 package raft
 
 type Transporter interface {
-	SendVoteRequest(server *Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse
+	SendVoteRequest(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse
 }

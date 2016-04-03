@@ -3,11 +3,11 @@ package raft
 import "fmt"
 
 type testTransporter struct {
-	sendVoteRequestFunc func(server *Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse
+	sendVoteRequestFunc func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse
 }
 
-func (t *testTransporter) SendVoteRequest(server *Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
-	return t.sendVoteRequestFunc(server, peer, req)
+func (t *testTransporter) SendVoteRequest(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
+	return t.sendVoteRequestFunc(peer, req)
 }
 
 func newTestCluster(names []string, transporter Transporter, servers map[string]*Server) []*Server {

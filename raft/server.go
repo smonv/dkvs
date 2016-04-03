@@ -1,19 +1,10 @@
 package raft
 
 import (
-	"fmt"
 	"log"
 	"os"
 	"sync"
 	"time"
-)
-
-// Raft server state
-const (
-	Follower = iota
-	Candidate
-	Leader
-	Stopped
 )
 
 const (
@@ -29,10 +20,10 @@ const (
 type Server struct {
 	name        string
 	currentTerm uint64
-	state       uint8
+	state       State
 	votedFor    string
 	logs        []string
-	rpcCh       chan *RPC
+	rpcCh       chan RPC
 	transporter Transporter
 	leader      string
 	peers       map[string]*Peer
@@ -49,10 +40,10 @@ func NewServer(name string, transporter Transporter) *Server {
 		state:       Stopped,
 		votedFor:    "",
 		logs:        []string{},
-		rpcCh:       make(chan *RPC),
+		rpcCh:       make(chan RPC),
 		transporter: transporter,
 		peers:       make(map[string]*Peer),
-		logger:      log.New(os.Stdout, "[raft] ", log.Lmicroseconds),
+		logger:      log.New(os.Stdout, "", log.LstdFlags),
 	}
 
 	return s
@@ -62,6 +53,7 @@ func NewServer(name string, transporter Transporter) *Server {
 func (s *Server) Start() {
 	s.stopCh = make(chan bool)
 	s.setState(Follower)
+	s.logger.Printf("[DEBUG] server %s started as %s ", s.name, s.State().String())
 	go s.run()
 }
 
@@ -72,6 +64,7 @@ func (s *Server) Stop() {
 	}
 	close(s.stopCh)
 	s.setState(Stopped)
+	s.logger.Printf("[DEBUG] server %s stopped. Current state: %s", s.name, s.State().String())
 	return
 }
 
@@ -114,6 +107,7 @@ func (s *Server) runAsFollower() {
 }
 
 func (s *Server) runAsCandidate() {
+	s.logger.Printf("[DEBUG] server %s enter %s state", s.name, s.State().String())
 	doVote := true
 	votesGranted := 0
 	var electionTimeout <-chan time.Time
@@ -126,7 +120,7 @@ func (s *Server) runAsCandidate() {
 			respCh = make(chan *RequestVoteResponse, len(s.peers))
 			for _, peer := range s.peers {
 				go func(peer *Peer) {
-					peer.sendVoteRequest(newRequestVoteRequest(s.currentTerm, s.name, 1, 0), respCh)
+					s.sendVoteRequest(peer, newRequestVoteRequest(s.currentTerm, s.name, 1, 0), respCh)
 				}(peer)
 			}
 			votesGranted = 1
@@ -136,6 +130,7 @@ func (s *Server) runAsCandidate() {
 		// If receive enough vote, stop waiting and promote to leader
 		if votesGranted == s.QuorumSize() {
 			s.setState(Leader)
+			s.logger.Printf("[DEBUG] server %s become %s", s.name, s.State().String())
 			return
 		}
 
@@ -164,39 +159,41 @@ func (s *Server) runAsLeader() {
 	}
 }
 
-func (s *Server) send(command interface{}) (interface{}, error) {
-	rpc := &RPC{
-		Request: command,
-		err:     make(chan error),
+func (s *Server) send(command interface{}) interface{} {
+	s.logger.Printf("[DEBUG] server %s send command: %+v", s.name, command)
+	rpc := RPC{
+		Command:  command,
+		RespChan: make(chan RPCResponse),
 	}
 	select {
 	case s.rpcCh <- rpc:
 	case <-s.stopCh:
-		return nil, fmt.Errorf("shutdown")
+		return nil
 	}
 	select {
 	case <-s.stopCh:
-		return nil, fmt.Errorf("shutdown")
-	case err := <-rpc.err:
-		return rpc.Response, err
+		return nil
+	case resp := <-rpc.RespChan:
+		return resp
 	}
 }
 
-func (s *Server) processRPC(rpc *RPC) {
+func (s *Server) processRPC(rpc RPC) {
+	s.logger.Printf("[DEBUG] server %s processRPC : %+v", s.name, rpc)
 	var err error
-	switch cmd := rpc.Request.(type) {
+	switch cmd := rpc.Command.(type) {
 	case *RequestVoteRequest:
 		resp, _ := s.processRequestVote(cmd)
-		rpc.Response = resp
+		s.logger.Printf("[DEBUG] request vote response: %+v", resp)
+		rpc.Response(resp, err)
 	default:
 	}
-	rpc.err <- err
 }
 
 // RequestVote is used to send request vote and return response
 func (s *Server) RequestVote(req *RequestVoteRequest) *RequestVoteResponse {
-	ret, _ := s.send(req)
-	resp, _ := ret.(*RequestVoteResponse)
+	ret := s.send(req)
+	resp := ret.(RPCResponse).Response.(*RequestVoteResponse)
 	return resp
 }
 
@@ -253,11 +250,11 @@ func (s *Server) setTerm(newTerm uint64) {
 }
 
 // State is used to get current state of server
-func (s *Server) State() uint8 {
+func (s *Server) State() State {
 	return s.state
 }
 
-func (s *Server) setState(newState uint8) {
+func (s *Server) setState(newState State) {
 	s.state = newState
 }
 
@@ -274,6 +271,12 @@ func (s *Server) MemberCount() int {
 // QuorumSize is used to get number of major server
 func (s *Server) QuorumSize() int {
 	return (s.MemberCount() / 2) + 1
+}
+
+func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *RequestVoteResponse) {
+	if resp := s.Transporter().SendVoteRequest(p, req); resp != nil {
+		c <- resp
+	}
 }
 
 func (s *Server) AddPeer(name string, connectionString string) error {

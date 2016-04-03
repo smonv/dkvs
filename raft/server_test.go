@@ -10,7 +10,7 @@ const (
 	testElectionTimeout = 200 * time.Millisecond
 )
 
-func TestNewServerStartAsFollower(t *testing.T) {
+func TestServerStartAsFollower(t *testing.T) {
 	s := NewServer("test", &testTransporter{})
 	s.Start()
 	defer s.Stop()
@@ -126,7 +126,7 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
 	transporter := &testTransporter{}
-	transporter.sendVoteRequestFunc = func(server *Server, peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
+	transporter.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
 		return servers[peer.Name].RequestVote(req)
 	}
 
