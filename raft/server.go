@@ -159,42 +159,17 @@ func (s *Server) runAsLeader() {
 	}
 }
 
-func (s *Server) send(command interface{}) interface{} {
-	s.logger.Printf("[DEBUG] server %s send command: %+v", s.name, command)
-	rpc := RPC{
-		Command:  command,
-		RespChan: make(chan RPCResponse),
-	}
-	select {
-	case s.rpcCh <- rpc:
-	case <-s.stopCh:
-		return nil
-	}
-	select {
-	case <-s.stopCh:
-		return nil
-	case resp := <-rpc.RespChan:
-		return resp
-	}
-}
-
 func (s *Server) processRPC(rpc RPC) {
 	s.logger.Printf("[DEBUG] server %s processRPC : %+v", s.name, rpc)
 	var err error
 	switch cmd := rpc.Command.(type) {
 	case *RequestVoteRequest:
+		s.logger.Printf("[DEBUG] server %s received request vote %v", s.name, cmd)
 		resp, _ := s.processRequestVote(cmd)
 		s.logger.Printf("[DEBUG] request vote response: %+v", resp)
 		rpc.Response(resp, err)
 	default:
 	}
-}
-
-// RequestVote is used to send request vote and return response
-func (s *Server) RequestVote(req *RequestVoteRequest) *RequestVoteResponse {
-	ret := s.send(req)
-	resp := ret.(RPCResponse).Response.(*RequestVoteResponse)
-	return resp
 }
 
 func (s *Server) processRequestVote(req *RequestVoteRequest) (*RequestVoteResponse, bool) {

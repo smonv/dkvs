@@ -25,7 +25,8 @@ func TestServerRequestVote(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	resp := s.RequestVote(newRequestVoteRequest(1, "foo", 1, 0))
+	resp := requestVote(s, newRequestVoteRequest(1, "foo", 1, 0))
+
 	if !resp.VoteGranted {
 		t.Fatalf("invalide request vote response")
 	}
@@ -37,7 +38,8 @@ func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
 	defer s.Stop()
 
 	s.currentTerm = 2
-	resp := s.RequestVote(newRequestVoteRequest(1, "foo", 1, 0))
+	resp := requestVote(s, newRequestVoteRequest(1, "foo", 1, 0))
+
 	if resp.Term != 2 || resp.VoteGranted {
 		t.Fatalf("invalid request vote response %v/%v", resp.Term, resp.VoteGranted)
 	}
@@ -52,11 +54,12 @@ func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
 	defer s.Stop()
 
 	s.currentTerm = 2
-	resp := s.RequestVote(newRequestVoteRequest(2, "foo", 1, 0))
+	resp := requestVote(s, newRequestVoteRequest(2, "foo", 1, 0))
+
 	if resp.Term != 2 || !resp.VoteGranted {
 		t.Fatalf("First vote should not be denied")
 	}
-	resp = s.RequestVote(newRequestVoteRequest(2, "bar", 1, 0))
+	resp = requestVote(s, newRequestVoteRequest(2, "bar", 1, 0))
 	if resp.Term != 2 || resp.VoteGranted {
 		t.Fatalf("Second vote should be denied")
 	}
@@ -71,11 +74,11 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 	s.currentTerm = 2
 	s.mutex.Unlock()
 
-	resp := s.RequestVote(newRequestVoteRequest(2, "foo", 1, 0))
+	resp := requestVote(s, newRequestVoteRequest(2, "foo", 1, 0))
 	if resp.Term != 2 || !resp.VoteGranted {
 		t.Fatalf("First vote should not be denied")
 	}
-	resp = s.RequestVote(newRequestVoteRequest(3, "bar", 1, 0))
+	resp = requestVote(s, newRequestVoteRequest(3, "bar", 1, 0))
 	if resp.Term != 3 || !resp.VoteGranted || s.votedFor != "bar" {
 		t.Fatalf("Second vote should not be denied")
 	}
@@ -127,7 +130,17 @@ func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
 	transporter := &testTransporter{}
 	transporter.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
-		return servers[peer.Name].RequestVote(req)
+		server := servers[peer.Name]
+		rpc := RPC{
+			Command:  req,
+			RespChan: make(chan RPCResponse),
+		}
+		server.rpcCh <- rpc
+		select {
+		case rpcResp := <-rpc.RespChan:
+			rpc := rpcResp.Response.(*RequestVoteResponse)
+			return rpc
+		}
 	}
 
 	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transporter, servers)
@@ -145,4 +158,21 @@ func TestServerPromote(t *testing.T) {
 	if cluster[0].State() != Leader && cluster[1].State() != Leader && cluster[2].State() != Leader {
 		t.Fatalf("No leader elected")
 	}
+}
+
+func requestVote(s *Server, req *RequestVoteRequest) *RequestVoteResponse {
+	rpc := RPC{
+		Command:  req,
+		RespChan: make(chan RPCResponse),
+	}
+
+	s.rpcCh <- rpc
+
+	var resp *RequestVoteResponse
+
+	select {
+	case rpcResp := <-rpc.RespChan:
+		resp = rpcResp.Response.(*RequestVoteResponse)
+	}
+	return resp
 }
