@@ -131,16 +131,8 @@ func TestServerPromote(t *testing.T) {
 	transporter := &testTransporter{}
 	transporter.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
 		server := servers[peer.Name]
-		rpc := RPC{
-			Command:  req,
-			RespChan: make(chan RPCResponse),
-		}
-		server.rpcCh <- rpc
-		select {
-		case rpcResp := <-rpc.RespChan:
-			rpc := rpcResp.Response.(*RequestVoteResponse)
-			return rpc
-		}
+		resp := requestVote(server, req)
+		return resp
 	}
 
 	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transporter, servers)
