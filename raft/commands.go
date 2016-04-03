@@ -1,5 +1,23 @@
 package raft
 
+// AppendEntryRequest is command used to append entry
+// to replicated log.
+type AppendEntryRequest struct {
+	Term              uint64
+	Leader            string
+	PrevLogIndex      uint64
+	PrevLogTerm       uint64
+	Entry             []*Log
+	LeaderCommitIndex uint64
+}
+
+// AppendEntryResponse is response returned from an AppendEntryRequest
+type AppendEntryResponse struct {
+	Term         uint64
+	LastLogIndex uint64
+	Success      bool
+}
+
 // RequestVoteRequest is used to make request vote message
 type RequestVoteRequest struct {
 	peer          *Peer

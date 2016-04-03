@@ -14,7 +14,7 @@ func TestServerStartAsFollower(t *testing.T) {
 	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
-	fmt.Println(s.State())
+
 	if s.State() != Follower {
 		t.Errorf("Server not start as follower")
 	}
@@ -37,7 +37,7 @@ func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	s.currentTerm = 2
+	s.setTerm(2)
 	resp := requestVote(s, newRequestVoteRequest(1, "foo", 1, 0))
 
 	if resp.Term != 2 || resp.VoteGranted {
@@ -53,7 +53,8 @@ func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	s.currentTerm = 2
+	s.setTerm(2)
+
 	resp := requestVote(s, newRequestVoteRequest(2, "foo", 1, 0))
 
 	if resp.Term != 2 || !resp.VoteGranted {
@@ -70,9 +71,7 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	s.mutex.Lock()
-	s.currentTerm = 2
-	s.mutex.Unlock()
+	s.setTerm(2)
 
 	resp := requestVote(s, newRequestVoteRequest(2, "foo", 1, 0))
 	if resp.Term != 2 || !resp.VoteGranted {
@@ -92,12 +91,13 @@ func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
 	s := NewServer("test", &testTransport{}, &testLog{})
 	s.logs.SetLogs([]*Log{l1, l2, l3})
 	lastIndex, _ := s.logs.LastIndex()
-	s.logger.Printf("lastIndex %v", lastIndex)
 	lastLog, _ := s.logs.GetLog(lastIndex)
 	s.setLastLog(lastLog.Index, lastLog.Term)
-	s.currentTerm = 2
+
 	s.Start()
 	defer s.Stop()
+
+	s.setTerm(2)
 
 	// request vote from term 3 with last log entry 2,2
 	resp := requestVote(s, newRequestVoteRequest(3, "foo", 2, 2))

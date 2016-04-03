@@ -15,5 +15,5 @@ type LogStore interface {
 	GetLog(index uint64) (*Log, error)
 	SetLog(log *Log) error
 	SetLogs(logs []*Log) error
-	//	DeleteRange(min, max uint64) error
+	DeleteRange(min, max uint64) error
 }

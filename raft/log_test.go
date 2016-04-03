@@ -36,3 +36,15 @@ func (t *testLog) SetLogs(logs []*Log) error {
 	}
 	return nil
 }
+
+func (t *testLog) DeleteRange(min, max uint64) error {
+	deleteLog := []*Log{}
+	for i := min; i < max; i++ {
+		for _, log := range t.testLogs {
+			if log.Index == i {
+				t.testLogs = append(t.testLogs[:i], t.testLogs[i+1:]...)
+			}
+		}
+	}
+	return nil
+}

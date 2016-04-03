@@ -25,6 +25,7 @@ type Server struct {
 	logs         LogStore
 	lastLogIndex uint64
 	lastLogTerm  uint64
+	commitIndex  uint64
 	rpcCh        chan RPC
 	transport    Transport
 	leader       string
@@ -61,7 +62,7 @@ func NewServer(name string, transport Transport, logs LogStore) *Server {
 func (s *Server) Start() {
 	s.stopCh = make(chan bool)
 	s.setState(Follower)
-	s.logger.Printf("[DEBUG] server %s started as %s ", s.name, s.State().String())
+	s.debug("server %s started as %s", s.name, s.State().String())
 	go s.run()
 }
 
@@ -72,7 +73,7 @@ func (s *Server) Stop() {
 	}
 	close(s.stopCh)
 	s.setState(Stopped)
-	s.logger.Printf("[DEBUG] server %s stopped. Current state: %s", s.name, s.State().String())
+	s.debug("server %s stopped. Current state: %s", s.name, s.State().String())
 	return
 }
 
@@ -115,7 +116,7 @@ func (s *Server) runAsFollower() {
 }
 
 func (s *Server) runAsCandidate() {
-	s.logger.Printf("[DEBUG] server %s enter %s state", s.name, s.State().String())
+	s.debug("server %s enter %s state", s.name, s.State().String())
 	doVote := true
 	votesGranted := 0
 	var electionTimeout <-chan time.Time
@@ -138,7 +139,7 @@ func (s *Server) runAsCandidate() {
 		// If receive enough vote, stop waiting and promote to leader
 		if votesGranted == s.QuorumSize() {
 			s.setState(Leader)
-			s.logger.Printf("[DEBUG] server %s become %s", s.name, s.State().String())
+			s.debug("server %s become %s", s.name, s.State().String())
 			return
 		}
 
@@ -168,13 +169,92 @@ func (s *Server) runAsLeader() {
 }
 
 func (s *Server) processRPC(rpc RPC) {
-	s.logger.Printf("[DEBUG] server %s processRPC : %+v", s.name, rpc)
+	s.debug("server %s processRPC : %+v", s.name, rpc)
 	switch cmd := rpc.Command.(type) {
+	case *AppendEntryRequest:
+
 	case *RequestVoteRequest:
 		s.logger.Printf("[DEBUG] server %s received request vote %+v", s.name, cmd)
 		s.processRequestVote(rpc, cmd)
 	default:
 	}
+}
+
+func (s *Server) processAppendEntry(rpc RPC, req *AppendEntryRequest) {
+	resp := &AppendEntryResponse{
+		Term:         s.Term(),
+		LastLogIndex: s.LastLogIndex(),
+		Success:      false,
+	}
+
+	var err error
+	defer func() {
+		rpc.Response(resp, err)
+	}()
+
+	if req.Term < s.Term() {
+		return
+	}
+
+	if req.Term > s.Term() || s.State() != Follower {
+		s.setTerm(req.Term)
+		s.setState(Follower)
+		resp.Term = req.Term
+	}
+
+	s.setLeader(req.Leader)
+	if req.PrevLogIndex > 0 {
+		lastLogIndex, lastLogTerm := s.LastLog()
+		var prevLogTerm uint64
+		if req.PrevLogIndex == lastLogIndex {
+			prevLogTerm = lastLogTerm
+		} else {
+			prevLog, err := s.logs.GetLog(req.PrevLogIndex)
+			if err != nil {
+				s.debug("failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
+				return
+			}
+			prevLogTerm = prevLog.Term
+		}
+
+		if req.PrevLogTerm != prevLogTerm {
+			s.debug("Previouse log term mis-match: current: %v request: %v", prevLogTerm, req.PrevLogTerm)
+			return
+		}
+	}
+
+	// Process any new entry
+	if n := len(req.Entry); n > 0 {
+		first := req.Entry[0]
+		last := req.Entry[n-1]
+		lastLogIndex := s.LastLogIndex()
+		if first.Index < lastLogIndex {
+			s.debug("clear log from %d to %d", first.Index, lastLogIndex)
+			if err := s.logs.DeleteRange(first.Index, lastLogIndex); err != nil {
+				s.debug("failed to clear log: %v", err)
+				return
+			}
+		}
+
+		if err := s.logs.SetLogs(req.Entry); err != nil {
+			s.debug("failed to append to logs: %v", err)
+			return
+		}
+
+		s.setLastLog(last.Index, last.Term)
+	}
+
+	// Update commit index
+	if req.LeaderCommitIndex > 0 && req.LeaderCommitIndex > s.CommitIndex() {
+		if req.LeaderCommitIndex > s.LastLogIndex() {
+			s.setCommitIndex(s.LastLogIndex())
+		} else {
+			s.setCommitIndex(req.LeaderCommitIndex)
+		}
+	}
+
+	resp.Success = true
+	return
 }
 
 func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
@@ -185,7 +265,7 @@ func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 
 	var err error
 	defer func() {
-		s.logger.Printf("[DEBUG] request vote response: %+v", resp)
+		s.debug("request vote response: %+v", resp)
 		rpc.Response(resp, err)
 	}()
 
@@ -201,15 +281,15 @@ func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 		s.setTerm(req.Term)
 		resp.Term = s.Term()
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
-		s.logger.Printf("[DEBUG] duplicate vote: %s already vote for %s", req.CandidateName, s.votedFor)
+		s.debug("duplicate vote: %s already vote for %s", req.CandidateName, s.votedFor)
 		return
 	}
 
 	// If the candidate's log is not update-to-date, don't vote
 	lastIndex, lastTerm := s.LastLog()
-	s.logger.Printf("[DEBUG] server %s last log: [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
+	s.debug("server %s last log: [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
 	if lastIndex > req.LastLogIndex || lastTerm > req.LastLogTerm {
-		s.logger.Printf("[DEBUG] out of date log. Current: [Index: %v,Term: %v]. Request: [Index: %v,Term: %v]", lastIndex,
+		s.debug("out of date log. Current: [Index: %v,Term: %v]. Request: [Index: %v,Term: %v]", lastIndex,
 			lastTerm, req.LastLogIndex, req.LastLogTerm)
 		return
 	}
@@ -233,33 +313,6 @@ func (s *Server) processRequestVoteResponse(resp *RequestVoteResponse) bool {
 	return false
 }
 
-// SET/GET
-
-// Term is used to get current term of server
-func (s *Server) Term() uint64 {
-	return s.currentTerm
-}
-
-func (s *Server) setTerm(newTerm uint64) {
-	s.mutex.Lock()
-	s.currentTerm = newTerm
-	s.mutex.Unlock()
-}
-
-// State is used to get current state of server
-func (s *Server) State() State {
-	return s.state
-}
-
-func (s *Server) setState(newState State) {
-	s.state = newState
-}
-
-// Transport is used to get transporter of server
-func (s *Server) Transport() Transport {
-	return s.transport
-}
-
 // MemberCount is used to get total member in cluster
 func (s *Server) MemberCount() int {
 	return len(s.peers) + 1
@@ -276,6 +329,7 @@ func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *Reque
 	}
 }
 
+// AddPeer is used to add a peer to server's peer
 func (s *Server) AddPeer(name string, connectionString string) error {
 	if s.peers[name] != nil {
 		return nil
@@ -291,6 +345,65 @@ func (s *Server) AddPeer(name string, connectionString string) error {
 	return nil
 }
 
+func (s *Server) debug(format string, v ...interface{}) {
+	s.logger.Printf("[DEBUG] "+format, v...)
+}
+
+// SET/GET
+
+// Name is used to get server name
+func (s *Server) Name() string {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.name
+}
+
+// Term is used to get current term of server
+func (s *Server) Term() uint64 {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.currentTerm
+}
+
+func (s *Server) setTerm(newTerm uint64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.currentTerm = newTerm
+}
+
+// State is used to get current state of server
+func (s *Server) State() State {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.state
+}
+
+func (s *Server) setState(newState State) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.state = newState
+}
+
+// Transport is used to get transporter of server
+func (s *Server) Transport() Transport {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.transport
+}
+
+// LastLogIndex is used to return server last log index
+func (s *Server) LastLogIndex() uint64 {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.lastLogIndex
+}
+
 func (s *Server) setLastLog(index uint64, term uint64) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
@@ -303,5 +416,28 @@ func (s *Server) setLastLog(index uint64, term uint64) {
 func (s *Server) LastLog() (uint64, uint64) {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
+
 	return s.lastLogIndex, s.lastLogTerm
+}
+
+func (s *Server) setLeader(leader string) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.leader = leader
+}
+
+// CommitIndex is used to return server lastest commit index
+func (s *Server) CommitIndex() uint64 {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	return s.commitIndex
+}
+
+func (s *Server) setCommitIndex(index uint64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.commitIndex = index
 }
