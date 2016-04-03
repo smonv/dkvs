@@ -10,13 +10,13 @@ func (t *testTransporter) SendVoteRequest(peer *Peer, req *RequestVoteRequest) *
 	return t.sendVoteRequestFunc(peer, req)
 }
 
-func newTestCluster(names []string, transporter Transporter, servers map[string]*Server) []*Server {
+func newTestCluster(names []string, transporter Transporter, logs LogStore, servers map[string]*Server) []*Server {
 	cluster := []*Server{}
 	for _, name := range names {
 		if servers[name] != nil {
 			fmt.Printf("duplicate name")
 		}
-		s := NewServer(name, transporter)
+		s := NewServer(name, transporter, logs)
 		cluster = append(cluster, s)
 		servers[name] = s
 	}

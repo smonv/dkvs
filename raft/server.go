@@ -18,32 +18,40 @@ const (
 
 // Server is provide Raft server information
 type Server struct {
-	name        string
-	currentTerm uint64
-	state       State
-	votedFor    string
-	logs        []string
-	rpcCh       chan RPC
-	transporter Transporter
-	leader      string
-	peers       map[string]*Peer
-	stopCh      chan bool
-	logger      *log.Logger
-	mutex       sync.RWMutex
+	name         string
+	currentTerm  uint64
+	state        State
+	votedFor     string
+	logs         LogStore
+	lastLogIndex uint64
+	lastLogTerm  uint64
+	rpcCh        chan RPC
+	transporter  Transporter
+	leader       string
+	peers        map[string]*Peer
+	stopCh       chan bool
+	logger       *log.Logger
+	mutex        sync.RWMutex
 }
 
 // NewServer is used to create new Raft server
-func NewServer(name string, transporter Transporter) *Server {
+func NewServer(name string, transporter Transporter, logs LogStore) *Server {
 	s := &Server{
 		name:        name,
 		currentTerm: 0,
 		state:       Stopped,
 		votedFor:    "",
-		logs:        []string{},
+		logs:        logs,
 		rpcCh:       make(chan RPC),
 		transporter: transporter,
 		peers:       make(map[string]*Peer),
 		logger:      log.New(os.Stdout, "", log.LstdFlags),
+	}
+
+	lastIndex, _ := s.logs.LastIndex()
+	if lastIndex > 0 {
+		lastLog, _ := s.logs.GetLog(lastIndex)
+		s.setLastLog(lastLog.Index, lastLog.Term)
 	}
 
 	return s
@@ -161,42 +169,56 @@ func (s *Server) runAsLeader() {
 
 func (s *Server) processRPC(rpc RPC) {
 	s.logger.Printf("[DEBUG] server %s processRPC : %+v", s.name, rpc)
-	var err error
 	switch cmd := rpc.Command.(type) {
 	case *RequestVoteRequest:
-		s.logger.Printf("[DEBUG] server %s received request vote %v", s.name, cmd)
-		resp, _ := s.processRequestVote(cmd)
-		s.logger.Printf("[DEBUG] request vote response: %+v", resp)
-		rpc.Response(resp, err)
+		s.logger.Printf("[DEBUG] server %s received request vote %+v", s.name, cmd)
+		s.processRequestVote(rpc, cmd)
 	default:
 	}
 }
 
-func (s *Server) processRequestVote(req *RequestVoteRequest) (*RequestVoteResponse, bool) {
+func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 	resp := &RequestVoteResponse{
 		Term:        s.Term(),
 		VoteGranted: false,
 	}
+
+	var err error
+	defer func() {
+		s.logger.Printf("[DEBUG] request vote response: %+v", resp)
+		rpc.Response(resp, err)
+	}()
+
 	// If term of request smaller than current term, reject
 	if req.Term < s.Term() {
-		return resp, false
+		return
 	}
+
 	// If term of request larger than current term, update current term
 	// If term is equal but already voted for different candidate then
 	// don't vote for this candidate
 	if req.Term > s.Term() {
 		s.setTerm(req.Term)
+		resp.Term = s.Term()
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
-		s.logger.Println("server.deny.vote: cause duplicate vote: "+req.CandidateName,
-			" already vote for: "+s.votedFor)
-		return resp, false
+		s.logger.Printf("[DEBUG] duplicate vote: %s already vote for %s", req.CandidateName, s.votedFor)
+		return
+	}
+
+	// If the candidate's log is not update-to-date, don't vote
+	lastIndex, lastTerm := s.LastLog()
+	s.logger.Printf("[DEBUG] server %s last log: [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
+	if lastIndex > req.LastLogIndex || lastTerm > req.LastLogTerm {
+		s.logger.Printf("[DEBUG] out of date log. Current: [Index: %v,Term: %v]. Request: [Index: %v,Term: %v]", lastIndex,
+			lastTerm, req.LastLogIndex, req.LastLogTerm)
+		return
 	}
 
 	// If everything ok then vote
 	s.votedFor = req.CandidateName
 	resp.VoteGranted = true
 	resp.Term = s.Term()
-	return resp, true
+	return
 }
 
 func (s *Server) processRequestVoteResponse(resp *RequestVoteResponse) bool {
@@ -268,4 +290,19 @@ func (s *Server) AddPeer(name string, connectionString string) error {
 		s.peers[name] = peer
 	}
 	return nil
+}
+
+func (s *Server) setLastLog(index uint64, term uint64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+
+	s.lastLogIndex = index
+	s.lastLogTerm = term
+}
+
+// LastLog is used to return lastLogIndex and lastLogTerm
+func (s *Server) LastLog() (uint64, uint64) {
+	s.mutex.Lock()
+	defer s.mutex.Unlock()
+	return s.lastLogIndex, s.lastLogTerm
 }
