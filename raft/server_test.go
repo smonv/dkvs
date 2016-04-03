@@ -11,7 +11,7 @@ const (
 )
 
 func TestServerStartAsFollower(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 	fmt.Println(s.State())
@@ -21,7 +21,7 @@ func TestServerStartAsFollower(t *testing.T) {
 }
 
 func TestServerRequestVote(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
@@ -33,7 +33,7 @@ func TestServerRequestVote(t *testing.T) {
 }
 
 func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
@@ -49,7 +49,7 @@ func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
 }
 
 func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
@@ -66,7 +66,7 @@ func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
 }
 
 func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
@@ -89,7 +89,7 @@ func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
 	l2 := &Log{Index: 2, Term: 1, Data: "data"}
 	l3 := &Log{Index: 3, Term: 2, Data: "data"}
 
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.logs.SetLogs([]*Log{l1, l2, l3})
 	lastIndex, _ := s.logs.LastIndex()
 	s.logger.Printf("lastIndex %v", lastIndex)
@@ -122,7 +122,7 @@ func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
 }
 
 func TestProcessRequestVoteResponse(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	s.currentTerm = 0
 
@@ -153,7 +153,7 @@ func TestProcessRequestVoteResponse(t *testing.T) {
 }
 
 func TestServerSelfPromoteToLeader(t *testing.T) {
-	s := NewServer("test", &testTransporter{}, &testLog{})
+	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
@@ -165,7 +165,7 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 
 func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
-	transporter := &testTransporter{}
+	transporter := &testTransport{}
 	transporter.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
 		server := servers[peer.Name]
 		resp := requestVote(server, req)
@@ -189,6 +189,24 @@ func TestServerPromote(t *testing.T) {
 	if cluster[0].State() != Leader && cluster[1].State() != Leader && cluster[2].State() != Leader {
 		t.Fatalf("No leader elected")
 	}
+}
+
+func newTestCluster(names []string, transport Transport, logs LogStore, servers map[string]*Server) []*Server {
+	cluster := []*Server{}
+	for _, name := range names {
+		if servers[name] != nil {
+			fmt.Printf("duplicate name")
+		}
+		s := NewServer(name, transport, logs)
+		cluster = append(cluster, s)
+		servers[name] = s
+	}
+	for _, s := range cluster {
+		for _, p := range cluster {
+			s.AddPeer(p.name, "")
+		}
+	}
+	return cluster
 }
 
 func requestVote(s *Server, req *RequestVoteRequest) *RequestVoteResponse {

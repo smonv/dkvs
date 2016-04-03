@@ -26,7 +26,7 @@ type Server struct {
 	lastLogIndex uint64
 	lastLogTerm  uint64
 	rpcCh        chan RPC
-	transporter  Transporter
+	transport    Transport
 	leader       string
 	peers        map[string]*Peer
 	stopCh       chan bool
@@ -35,7 +35,7 @@ type Server struct {
 }
 
 // NewServer is used to create new Raft server
-func NewServer(name string, transporter Transporter, logs LogStore) *Server {
+func NewServer(name string, transport Transport, logs LogStore) *Server {
 	s := &Server{
 		name:        name,
 		currentTerm: 0,
@@ -43,7 +43,7 @@ func NewServer(name string, transporter Transporter, logs LogStore) *Server {
 		votedFor:    "",
 		logs:        logs,
 		rpcCh:       make(chan RPC),
-		transporter: transporter,
+		transport:   transport,
 		peers:       make(map[string]*Peer),
 		logger:      log.New(os.Stdout, "", log.LstdFlags),
 	}
@@ -255,9 +255,9 @@ func (s *Server) setState(newState State) {
 	s.state = newState
 }
 
-// Transporter is used to get transporter of server
-func (s *Server) Transporter() Transporter {
-	return s.transporter
+// Transport is used to get transporter of server
+func (s *Server) Transport() Transport {
+	return s.transport
 }
 
 // MemberCount is used to get total member in cluster
@@ -271,7 +271,7 @@ func (s *Server) QuorumSize() int {
 }
 
 func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *RequestVoteResponse) {
-	if resp := s.Transporter().SendVoteRequest(p, req); resp != nil {
+	if resp := s.Transport().SendVoteRequest(p, req); resp != nil {
 		c <- resp
 	}
 }
@@ -283,7 +283,6 @@ func (s *Server) AddPeer(name string, connectionString string) error {
 
 	if s.name != name {
 		peer := &Peer{
-			server:           s,
 			Name:             name,
 			ConnectionString: connectionString,
 		}
