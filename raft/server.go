@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"sync"
@@ -14,6 +15,8 @@ const (
 
 	// DefaultElectionTimeout is the interval that follower will promote to Candidate
 	DefaultElectionTimeout = 150 * time.Millisecond
+	// ElectionTimeout test timer
+	ElectionTimeout = 150
 )
 
 // Server is provide Raft server information
@@ -33,6 +36,7 @@ type Server struct {
 	stopCh       chan bool
 	logger       *log.Logger
 	mutex        sync.RWMutex
+	wg           sync.WaitGroup
 }
 
 // NewServer is used to create new Raft server
@@ -62,8 +66,12 @@ func NewServer(name string, transport Transport, logs LogStore) *Server {
 func (s *Server) Start() {
 	s.stopCh = make(chan bool)
 	s.setState(Follower)
-	s.debug("server %s started as %s", s.name, s.State().String())
-	go s.run()
+	s.debug("server.state: %s started as %s", s.name, s.State().String())
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		go s.run()
+	}()
 }
 
 // Stop is used to stop raft server
@@ -72,8 +80,9 @@ func (s *Server) Stop() {
 		return
 	}
 	close(s.stopCh)
+	s.wg.Wait()
 	s.setState(Stopped)
-	s.debug("server %s stopped. Current state: %s", s.name, s.State().String())
+	s.debug("server.state: %s : %s", s.name, s.State().String())
 	return
 }
 
@@ -100,15 +109,20 @@ func (s *Server) run() {
 }
 
 func (s *Server) runAsFollower() {
-	electionTimeout := timeoutBetween(DefaultElectionTimeout)
+	s.debug("server.state: %s enter %s", s.name, s.State().String())
+
+	timer := time.NewTimer(randomDuration(ElectionTimeout))
+
 	for s.State() == Follower {
 		select {
 		case rpc := <-s.rpcCh:
-			electionTimeout = timeoutBetween(DefaultElectionTimeout)
 			s.processRPC(rpc)
-		case <-electionTimeout:
+			timer.Reset(randomDuration(ElectionTimeout))
+		case <-timer.C:
 			s.setState(Candidate)
+			timer.Reset(randomDuration(ElectionTimeout))
 		case <-s.stopCh:
+			timer.Stop()
 			s.setState(Stopped)
 			return
 		}
@@ -116,7 +130,7 @@ func (s *Server) runAsFollower() {
 }
 
 func (s *Server) runAsCandidate() {
-	s.debug("server %s enter %s state", s.name, s.State().String())
+	s.debug("server.state: %s enter %s", s.name, s.State().String())
 	doVote := true
 	votesGranted := 0
 	var electionTimeout <-chan time.Time
@@ -139,7 +153,7 @@ func (s *Server) runAsCandidate() {
 		// If receive enough vote, stop waiting and promote to leader
 		if votesGranted == s.QuorumSize() {
 			s.setState(Leader)
-			s.debug("server %s become %s", s.name, s.State().String())
+			s.debug("server.state: %s become %s", s.name, s.State().String())
 			return
 		}
 
@@ -160,27 +174,38 @@ func (s *Server) runAsCandidate() {
 }
 
 func (s *Server) runAsLeader() {
+	s.debug("server.state: %s as %s", s.Name(), s.State().String())
+	for _, peer := range s.peers {
+		s.startHeartbeat(peer)
+	}
+
 	for s.State() == Leader {
 		select {
 		case <-s.stopCh:
+			for _, peer := range s.peers {
+				s.stopHeartbeat(peer)
+			}
 			return
 		}
 	}
 }
 
 func (s *Server) processRPC(rpc RPC) {
-	s.debug("server %s processRPC : %+v", s.name, rpc)
+	s.debug("server.process.rpc %s : %+v", s.name, rpc)
 	switch cmd := rpc.Command.(type) {
 	case *AppendEntryRequest:
-
+		s.debug("server.entry.append.received: %s %+v", s.Name(), cmd)
+		s.processAppendEntries(rpc, cmd)
 	case *RequestVoteRequest:
-		s.logger.Printf("[DEBUG] server %s received request vote %+v", s.name, cmd)
+		s.debug("server.vote.request.received %s %+v", s.Name(), cmd)
 		s.processRequestVote(rpc, cmd)
 	default:
+		s.err("server.command.error: unexpected command: %v", rpc.Command)
+		rpc.Response(nil, fmt.Errorf("unexpected command"))
 	}
 }
 
-func (s *Server) processAppendEntry(rpc RPC, req *AppendEntryRequest) {
+func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	resp := &AppendEntryResponse{
 		Term:         s.Term(),
 		LastLogIndex: s.LastLogIndex(),
@@ -203,6 +228,7 @@ func (s *Server) processAppendEntry(rpc RPC, req *AppendEntryRequest) {
 	}
 
 	s.setLeader(req.Leader)
+	s.debug("server.leader: %s %s", s.Name(), s.leader)
 	if req.PrevLogIndex > 0 {
 		lastLogIndex, lastLogTerm := s.LastLog()
 		var prevLogTerm uint64
@@ -229,15 +255,15 @@ func (s *Server) processAppendEntry(rpc RPC, req *AppendEntryRequest) {
 		last := req.Entry[n-1]
 		lastLogIndex := s.LastLogIndex()
 		if first.Index < lastLogIndex {
-			s.debug("clear log from %d to %d", first.Index, lastLogIndex)
+			s.debug("server.log.clear: from %d to %d", first.Index, lastLogIndex)
 			if err := s.logs.DeleteRange(first.Index, lastLogIndex); err != nil {
-				s.debug("failed to clear log: %v", err)
+				s.debug("server.logs.clear.failed: %v", err)
 				return
 			}
 		}
 
 		if err := s.logs.SetLogs(req.Entry); err != nil {
-			s.debug("failed to append to logs: %v", err)
+			s.debug("server.logs.append.failed: %v", err)
 			return
 		}
 
@@ -257,6 +283,60 @@ func (s *Server) processAppendEntry(rpc RPC, req *AppendEntryRequest) {
 	return
 }
 
+func (s *Server) sendAppendEntries(p *Peer, req *AppendEntryRequest) *AppendEntryResponse {
+	s.debug("server.entry.append: %s -> %s [prevLog: %v term:%v length: %v]", s.Name(), p.Name,
+		req.PrevLogIndex, req.PrevLogTerm, len(req.Entry))
+	if resp := s.Transport().SendAppendEntries(p, req); resp != nil {
+		return resp
+	}
+	return nil
+}
+
+func (s *Server) startHeartbeat(p *Peer) {
+	p.stopCh = make(chan bool)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.sendHeartbeat(p)
+	}()
+}
+
+func (s *Server) stopHeartbeat(p *Peer) {
+	p.stopCh <- true
+}
+
+func (s *Server) sendHeartbeat(p *Peer) {
+
+	lastLogIndex, lastLogTerm := s.LastLog()
+
+	ticker := time.NewTicker(DefaultHeartbeatInterval)
+	for {
+		select {
+		case <-p.stopCh:
+			s.debug("server.heartbeat.stop: %s -> %s", s.Name(), p.Name)
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			s.debug("server.heartbeat.send: %s -> %s", s.Name(), p.Name)
+			req := &AppendEntryRequest{
+				Term:              s.Term(),
+				Leader:            s.Name(),
+				PrevLogIndex:      lastLogIndex,
+				PrevLogTerm:       lastLogTerm,
+				LeaderCommitIndex: s.CommitIndex(),
+			}
+			s.sendAppendEntries(p, req)
+		}
+	}
+}
+
+func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *RequestVoteResponse) {
+	s.debug("server.vote.request: %s -> %s [%+v]", s.Name(), p.Name, req)
+	if resp := s.Transport().SendVoteRequest(p, req); resp != nil {
+		c <- resp
+	}
+}
+
 func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 	resp := &RequestVoteResponse{
 		Term:        s.Term(),
@@ -265,7 +345,7 @@ func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 
 	var err error
 	defer func() {
-		s.debug("request vote response: %+v", resp)
+		s.debug("server.vote.response: %+v", resp)
 		rpc.Response(resp, err)
 	}()
 
@@ -281,15 +361,15 @@ func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 		s.setTerm(req.Term)
 		resp.Term = s.Term()
 	} else if s.votedFor != "" && s.votedFor != req.CandidateName {
-		s.debug("duplicate vote: %s already vote for %s", req.CandidateName, s.votedFor)
+		s.debug("server.vote.duplicate: %s already vote for %s", req.CandidateName, s.votedFor)
 		return
 	}
 
 	// If the candidate's log is not update-to-date, don't vote
 	lastIndex, lastTerm := s.LastLog()
-	s.debug("server %s last log: [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
+	s.debug("server.log.last: %s [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
 	if lastIndex > req.LastLogIndex || lastTerm > req.LastLogTerm {
-		s.debug("out of date log. Current: [Index: %v,Term: %v]. Request: [Index: %v,Term: %v]", lastIndex,
+		s.debug("server.log.outdate: current: [Index: %v,Term: %v] : request: [Index: %v,Term: %v]", lastIndex,
 			lastTerm, req.LastLogIndex, req.LastLogTerm)
 		return
 	}
@@ -323,12 +403,6 @@ func (s *Server) QuorumSize() int {
 	return (s.MemberCount() / 2) + 1
 }
 
-func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *RequestVoteResponse) {
-	if resp := s.Transport().SendVoteRequest(p, req); resp != nil {
-		c <- resp
-	}
-}
-
 // AddPeer is used to add a peer to server's peer
 func (s *Server) AddPeer(name string, connectionString string) error {
 	if s.peers[name] != nil {
@@ -347,6 +421,10 @@ func (s *Server) AddPeer(name string, connectionString string) error {
 
 func (s *Server) debug(format string, v ...interface{}) {
 	s.logger.Printf("[DEBUG] "+format, v...)
+}
+
+func (s *Server) err(format string, v ...interface{}) {
+	s.logger.Printf("[ERR] "+format, v...)
 }
 
 // SET/GET

@@ -165,16 +165,21 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 
 func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
-	transporter := &testTransport{}
-	transporter.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
+	transport := &testTransport{}
+	transport.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
 		server := servers[peer.Name]
 		resp := requestVote(server, req)
+		return resp
+	}
+	transport.sendAppendEntriesFunc = func(peer *Peer, req *AppendEntryRequest) *AppendEntryResponse {
+		server := servers[peer.Name]
+		resp := appendEntries(server, req)
 		return resp
 	}
 
 	logs := &testLog{}
 
-	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transporter, logs, servers)
+	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transport, logs, servers)
 
 	for _, s := range cluster {
 		s.Start()
@@ -222,6 +227,20 @@ func requestVote(s *Server, req *RequestVoteRequest) *RequestVoteResponse {
 	select {
 	case rpcResp := <-rpc.RespChan:
 		resp = rpcResp.Response.(*RequestVoteResponse)
+	}
+	return resp
+}
+
+func appendEntries(s *Server, req *AppendEntryRequest) *AppendEntryResponse {
+	rpc := RPC{
+		Command:  req,
+		RespChan: make(chan RPCResponse),
+	}
+	s.rpcCh <- rpc
+	var resp *AppendEntryResponse
+	select {
+	case rpcResp := <-rpc.RespChan:
+		resp = rpcResp.Response.(*AppendEntryResponse)
 	}
 	return resp
 }
