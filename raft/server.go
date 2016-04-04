@@ -133,7 +133,7 @@ func (s *Server) runAsCandidate() {
 	s.debug("server.state: %s enter %s", s.name, s.State().String())
 	doVote := true
 	votesGranted := 0
-	var electionTimeout <-chan time.Time
+	var electionTimeout *time.Timer
 	var respCh chan *RequestVoteResponse
 
 	for s.State() == Candidate {
@@ -147,7 +147,7 @@ func (s *Server) runAsCandidate() {
 				}(peer)
 			}
 			votesGranted = 1
-			electionTimeout = timeoutBetween(DefaultElectionTimeout)
+			electionTimeout = time.NewTimer(randomDuration(ElectionTimeout))
 			doVote = false
 		}
 		// If receive enough vote, stop waiting and promote to leader
@@ -159,6 +159,7 @@ func (s *Server) runAsCandidate() {
 
 		select {
 		case <-s.stopCh:
+			electionTimeout.Stop()
 			s.setState(Stopped)
 			return
 		case resp := <-respCh:
@@ -167,7 +168,7 @@ func (s *Server) runAsCandidate() {
 			}
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
-		case <-electionTimeout:
+		case <-electionTimeout.C:
 			doVote = true
 		}
 	}
