@@ -111,18 +111,18 @@ func (s *Server) run() {
 func (s *Server) runAsFollower() {
 	s.debug("server.state: %s enter %s", s.name, s.State().String())
 
-	timer := time.NewTimer(randomDuration(ElectionTimeout))
+	electionTimeout := time.NewTimer(randomDuration(ElectionTimeout))
 
 	for s.State() == Follower {
 		select {
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
-			timer.Reset(randomDuration(ElectionTimeout))
-		case <-timer.C:
+			electionTimeout.Reset(randomDuration(ElectionTimeout))
+		case <-electionTimeout.C:
 			s.setState(Candidate)
-			timer.Reset(randomDuration(ElectionTimeout))
+			electionTimeout.Reset(randomDuration(ElectionTimeout))
 		case <-s.stopCh:
-			timer.Stop()
+			electionTimeout.Stop()
 			s.setState(Stopped)
 			return
 		}
