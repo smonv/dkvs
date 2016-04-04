@@ -7,7 +7,7 @@ type AppendEntryRequest struct {
 	Leader            string
 	PrevLogIndex      uint64
 	PrevLogTerm       uint64
-	Entry             []*Log
+	Entries           []*Log
 	LeaderCommitIndex uint64
 }
 
@@ -40,5 +40,16 @@ func newRequestVoteRequest(term uint64, candidateName string, lastLogIndex uint6
 		CandidateName: candidateName,
 		LastLogIndex:  lastLogIndex,
 		LastLogTerm:   lastLogTerm,
+	}
+}
+
+func newAppendEntriesRequest(term uint64, leader string, prevLogIndex uint64, prevLogTerm uint64, entries []*Log, leaderCommitIndex uint64) *AppendEntryRequest {
+	return &AppendEntryRequest{
+		Term:              term,
+		Leader:            leader,
+		PrevLogIndex:      prevLogIndex,
+		PrevLogTerm:       prevLogTerm,
+		Entries:           entries,
+		LeaderCommitIndex: leaderCommitIndex,
 	}
 }

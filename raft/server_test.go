@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
@@ -157,7 +156,7 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	time.Sleep(2 * DefaultElectionTimeout)
+	time.Sleep(2 * ElectionTimeout * time.Millisecond)
 	if s.State() != Leader {
 		t.Fatalf("Server not promote to leader")
 	}
@@ -190,57 +189,65 @@ func TestServerPromote(t *testing.T) {
 			s.Stop()
 		}
 	}()
+
 	time.Sleep(2 * testElectionTimeout)
+
 	if cluster[0].State() != Leader && cluster[1].State() != Leader && cluster[2].State() != Leader {
 		t.Fatalf("No leader elected")
 	}
 }
 
-func newTestCluster(names []string, transport Transport, logs LogStore, servers map[string]*Server) []*Server {
-	cluster := []*Server{}
-	for _, name := range names {
-		if servers[name] != nil {
-			fmt.Printf("duplicate name")
-		}
-		s := NewServer(name, transport, logs)
-		cluster = append(cluster, s)
-		servers[name] = s
+// Append Entries
+func TestServerAppendEnties(t *testing.T) {
+	s := NewServer("test", &testTransport{}, &testLog{})
+	s.Start()
+	defer s.Stop()
+
+	e1 := &Log{Index: 1, Term: 1, Data: "test data"}
+	entries := []*Log{e1}
+	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
+	if resp.Term != 1 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
 	}
-	for _, s := range cluster {
-		for _, p := range cluster {
-			s.AddPeer(p.name, "")
-		}
+	if index, term := s.LastLog(); index != 0 || term != 0 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
-	return cluster
+
+	e2 := &Log{Index: 2, Term: 1, Data: "test data"}
+	e3 := &Log{Index: 3, Term: 1, Data: "test data"}
+	entries = []*Log{e2, e3}
+	resp = appendEntries(s, newAppendEntriesRequest(1, "leader", 1, 1, entries, 1))
+	if resp.Term != 1 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+	if index, term := s.LastLog(); index != 1 || term != 1 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+	}
+
+	resp = appendEntries(s, newAppendEntriesRequest(2, "leader", 3, 1, []*Log{}, 3))
+
+	if resp.Term != 2 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+	if index, term := s.LastLog(); index != 3 || term != 2 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+	}
 }
 
-func requestVote(s *Server, req *RequestVoteRequest) *RequestVoteResponse {
-	rpc := RPC{
-		Command:  req,
-		RespChan: make(chan RPCResponse),
+func TestServerRejectOlderTermAppendEntries(t *testing.T) {
+	s := NewServer("test", &testTransport{}, &testLog{})
+	s.Start()
+	defer s.Stop()
+	s.setTerm(2)
+
+	e := &Log{Index: 1, Term: 1, Data: "test data"}
+	entries := []*Log{e}
+	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
+	if resp.Term != 2 || resp.Success {
+		t.Fatalf("AppendEntries should be failed: %v/%v", resp.Term, resp.Success)
 	}
 
-	s.rpcCh <- rpc
-
-	var resp *RequestVoteResponse
-
-	select {
-	case rpcResp := <-rpc.RespChan:
-		resp = rpcResp.Response.(*RequestVoteResponse)
+	if index, term := s.LastLog(); index != 0 || term != 0 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
-	return resp
-}
-
-func appendEntries(s *Server, req *AppendEntryRequest) *AppendEntryResponse {
-	rpc := RPC{
-		Command:  req,
-		RespChan: make(chan RPCResponse),
-	}
-	s.rpcCh <- rpc
-	var resp *AppendEntryResponse
-	select {
-	case rpcResp := <-rpc.RespChan:
-		resp = rpcResp.Response.(*AppendEntryResponse)
-	}
-	return resp
 }
