@@ -18,22 +18,24 @@ const (
 
 // Server is provide Raft server information
 type Server struct {
-	name         string
-	currentTerm  uint64
-	state        State
-	votedFor     string
-	logs         LogStore
+	name        string
+	currentTerm uint64
+	state       State
+	votedFor    string
+	logs        LogStore
+	rpcCh       chan RPC
+	transport   Transport
+	leader      string
+	peers       map[string]*Peer
+	stopCh      chan bool
+
 	lastLogIndex uint64
 	lastLogTerm  uint64
 	commitIndex  uint64
-	rpcCh        chan RPC
-	transport    Transport
-	leader       string
-	peers        map[string]*Peer
-	stopCh       chan bool
-	logger       *log.Logger
-	mutex        sync.RWMutex
-	wg           sync.WaitGroup
+
+	logger *log.Logger
+	mutex  sync.RWMutex
+	wg     sync.WaitGroup
 }
 
 // NewServer is used to create new Raft server

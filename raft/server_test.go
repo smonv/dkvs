@@ -83,12 +83,12 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 }
 
 func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
-	l1 := &Log{Index: 1, Term: 1, Data: "data"}
-	l2 := &Log{Index: 2, Term: 1, Data: "data"}
-	l3 := &Log{Index: 3, Term: 2, Data: "data"}
+	e1 := &Entry{Index: 1, Term: 1}
+	e2 := &Entry{Index: 2, Term: 1}
+	e3 := &Entry{Index: 3, Term: 2}
 
 	s := NewServer("test", &testTransport{}, &testLog{})
-	s.logs.SetLogs([]*Log{l1, l2, l3})
+	s.logs.SetLogs([]*Entry{e1, e2, e3})
 	lastIndex, _ := s.logs.LastIndex()
 	lastLog, _ := s.logs.GetLog(lastIndex)
 	s.setLastLog(lastLog.Index, lastLog.Term)
@@ -203,8 +203,8 @@ func TestServerAppendEnties(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	e1 := &Log{Index: 1, Term: 1, Data: "test data"}
-	entries := []*Log{e1}
+	e1 := &Entry{Index: 1, Term: 1}
+	entries := []*Entry{e1}
 	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
 	if resp.Term != 1 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -213,9 +213,9 @@ func TestServerAppendEnties(t *testing.T) {
 		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
 
-	e2 := &Log{Index: 2, Term: 1, Data: "test data"}
-	e3 := &Log{Index: 3, Term: 1, Data: "test data"}
-	entries = []*Log{e2, e3}
+	e2 := &Entry{Index: 2, Term: 1}
+	e3 := &Entry{Index: 3, Term: 1}
+	entries = []*Entry{e2, e3}
 	resp = appendEntries(s, newAppendEntriesRequest(1, "leader", 1, 1, entries, 1))
 	if resp.Term != 1 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -224,7 +224,7 @@ func TestServerAppendEnties(t *testing.T) {
 		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
 
-	resp = appendEntries(s, newAppendEntriesRequest(2, "leader", 3, 1, []*Log{}, 3))
+	resp = appendEntries(s, newAppendEntriesRequest(2, "leader", 3, 1, []*Entry{}, 3))
 
 	if resp.Term != 2 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -240,8 +240,8 @@ func TestServerRejectOlderTermAppendEntries(t *testing.T) {
 	defer s.Stop()
 	s.setTerm(2)
 
-	e := &Log{Index: 1, Term: 1, Data: "test data"}
-	entries := []*Log{e}
+	e := &Entry{Index: 1, Term: 1}
+	entries := []*Entry{e}
 	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
 	if resp.Term != 2 || resp.Success {
 		t.Fatalf("AppendEntries should be failed: %v/%v", resp.Term, resp.Success)
