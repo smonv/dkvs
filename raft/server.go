@@ -18,37 +18,50 @@ const (
 
 // Server is provide Raft server information
 type Server struct {
-	name        string
+	localAddr   string
 	currentTerm uint64
 	state       State
 	votedFor    string
-	logs        LogStore
-	rpcCh       chan RPC
-	transport   Transport
 	leader      string
-	peers       map[string]*Peer
-	stopCh      chan bool
 
+	// transport layer
+	transport Transport
+
+	// channel receive rpc from transport layer
+	rpcCh chan RPC
+
+	logs         LogStore
 	lastLogIndex uint64
 	lastLogTerm  uint64
 	commitIndex  uint64
 
+	peers       []string
+	followers   map[string]*follower
+	syncedPeers int
+
 	logger *log.Logger
 	mutex  sync.RWMutex
 	wg     sync.WaitGroup
+
+	// channel receive stop signal
+	stopCh chan bool
+
+	// leader only
+	// channel receive commit log
+	commitCh chan struct{}
 }
 
 // NewServer is used to create new Raft server
-func NewServer(name string, transport Transport, logs LogStore) *Server {
+func NewServer(localAddr string, transport Transport, logs LogStore) *Server {
 	s := &Server{
-		name:        name,
+		localAddr:   localAddr,
 		currentTerm: 0,
 		state:       Stopped,
 		votedFor:    "",
 		logs:        logs,
 		rpcCh:       make(chan RPC),
 		transport:   transport,
-		peers:       make(map[string]*Peer),
+		peers:       []string{},
 		logger:      log.New(os.Stdout, "", log.LstdFlags),
 	}
 
@@ -65,7 +78,7 @@ func NewServer(name string, transport Transport, logs LogStore) *Server {
 func (s *Server) Start() {
 	s.stopCh = make(chan bool)
 	s.setState(Follower)
-	s.debug("server.state: %s started as %s", s.name, s.State().String())
+	s.debug("server.state: %s started as %s", s.LocalAddress(), s.State().String())
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -81,7 +94,7 @@ func (s *Server) Stop() {
 	close(s.stopCh)
 	s.wg.Wait()
 	s.setState(Stopped)
-	s.debug("server.state: %s : %s", s.name, s.State().String())
+	s.debug("server.state: %s : %s", s.LocalAddress(), s.State().String())
 	return
 }
 
@@ -96,17 +109,10 @@ func (s *Server) QuorumSize() int {
 }
 
 // AddPeer is used to add a peer to server's peer
-func (s *Server) AddPeer(name string, connectionString string) error {
-	if s.peers[name] != nil {
-		return nil
-	}
+func (s *Server) AddPeer(peer string) error {
 
-	if s.name != name {
-		peer := &Peer{
-			Name:             name,
-			ConnectionString: connectionString,
-		}
-		s.peers[name] = peer
+	if s.LocalAddress() != peer {
+		s.peers = append(s.peers, peer)
 	}
 	return nil
 }
@@ -121,12 +127,12 @@ func (s *Server) err(format string, v ...interface{}) {
 
 // SET/GET
 
-// Name is used to get server name
-func (s *Server) Name() string {
+// LocalAddress is used to get server name
+func (s *Server) LocalAddress() string {
 	s.mutex.Lock()
 	defer s.mutex.Unlock()
 
-	return s.name
+	return s.localAddr
 }
 
 // Term is used to get current term of server

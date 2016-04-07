@@ -4,10 +4,10 @@ package raft
 // to replicated log.
 type AppendEntryRequest struct {
 	Term              uint64
-	Leader            string
 	PrevLogIndex      uint64
 	PrevLogTerm       uint64
 	Entries           []*Entry
+	Leader            string
 	LeaderCommitIndex uint64
 }
 
@@ -43,13 +43,13 @@ func newRequestVoteRequest(term uint64, candidateName string, lastLogIndex uint6
 	}
 }
 
-func newAppendEntriesRequest(term uint64, leader string, prevLogIndex uint64, prevLogTerm uint64, entries []*Entry, leaderCommitIndex uint64) *AppendEntryRequest {
+func newAppendEntriesRequest(term uint64, prevLogIndex uint64, prevLogTerm uint64, entries []*Entry, leader string, leaderCommitIndex uint64) *AppendEntryRequest {
 	return &AppendEntryRequest{
 		Term:              term,
-		Leader:            leader,
 		PrevLogIndex:      prevLogIndex,
 		PrevLogTerm:       prevLogTerm,
 		Entries:           entries,
+		Leader:            leader,
 		LeaderCommitIndex: leaderCommitIndex,
 	}
 }

@@ -14,7 +14,7 @@ func newTestCluster(names []string, transport Transport, logs LogStore, servers 
 	}
 	for _, s := range cluster {
 		for _, p := range cluster {
-			s.AddPeer(p.name, "")
+			s.AddPeer(p.LocalAddress())
 		}
 	}
 	return cluster

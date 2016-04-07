@@ -4,5 +4,7 @@ package raft
 type Peer struct {
 	Name             string
 	ConnectionString string
+	matchIndex       uint64
+	nextIndex        uint64
 	stopCh           chan bool
 }

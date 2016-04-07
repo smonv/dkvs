@@ -28,7 +28,7 @@ func (s *Server) run() {
 }
 
 func (s *Server) runAsFollower() {
-	s.debug("server.state: %s enter %s", s.name, s.State().String())
+	s.debug("server.state: %s enter %s", s.LocalAddress(), s.State().String())
 
 	electionTimeout := time.NewTimer(randomDuration(ElectionTimeout))
 
@@ -49,7 +49,7 @@ func (s *Server) runAsFollower() {
 }
 
 func (s *Server) runAsCandidate() {
-	s.debug("server.state: %s enter %s", s.name, s.State().String())
+	s.debug("server.state: %s enter %s", s.LocalAddress(), s.State().String())
 	doVote := true
 	votesGranted := 0
 	var electionTimeout *time.Timer
@@ -58,11 +58,11 @@ func (s *Server) runAsCandidate() {
 	for s.State() == Candidate {
 		if doVote {
 			s.currentTerm++
-			s.votedFor = s.name
+			s.votedFor = s.LocalAddress()
 			respCh = make(chan *RequestVoteResponse, len(s.peers))
 			for _, peer := range s.peers {
-				go func(peer *Peer) {
-					s.sendVoteRequest(peer, newRequestVoteRequest(s.currentTerm, s.name, 1, 0), respCh)
+				go func(peer string) {
+					s.sendVoteRequest(peer, newRequestVoteRequest(s.currentTerm, s.LocalAddress(), 1, 0), respCh)
 				}(peer)
 			}
 			votesGranted = 1
@@ -72,7 +72,7 @@ func (s *Server) runAsCandidate() {
 		// If receive enough vote, stop waiting and promote to leader
 		if votesGranted == s.QuorumSize() {
 			s.setState(Leader)
-			s.debug("server.state: %s become %s", s.name, s.State().String())
+			s.debug("server.state: %s become %s", s.LocalAddress(), s.State().String())
 			return
 		}
 
@@ -94,30 +94,98 @@ func (s *Server) runAsCandidate() {
 }
 
 func (s *Server) runAsLeader() {
-	s.debug("server.state: %s as %s", s.Name(), s.State().String())
+	s.debug("server.state: %s as %s", s.LocalAddress(), s.State().String())
+	s.followers = make(map[string]*follower)
+	// send heartbeat to notify leadership
 	for _, peer := range s.peers {
-		go s.replicate(peer)
+		s.startReplication(peer)
 	}
 
 	for s.State() == Leader {
 		select {
 		case <-s.stopCh:
-			for _, peer := range s.peers {
-				s.stopHeartbeat(peer)
+			for _, f := range s.followers {
+				close(f.stopCh)
 			}
+			return
+		case rpc := <-s.rpcCh:
+			s.processRPC(rpc)
+		}
+	}
+}
+
+func (s *Server) startReplication(peer string) {
+	lastLogIndex := s.LastLogIndex()
+	f := &follower{
+		peer:        peer,
+		currentTerm: s.Term(),
+		matchIndex:  0,
+		nextIndex:   lastLogIndex + 1,
+		stopCh:      make(chan bool),
+	}
+
+	s.followers[peer] = f
+	go s.replicate(f)
+}
+
+func (s *Server) replicate(f *follower) {
+	stopHeartbeat := make(chan struct{})
+	defer close(stopHeartbeat)
+	s.wg.Add(1)
+	go func(f *follower, stopHeartbeat chan struct{}) {
+		defer s.wg.Done()
+		s.heartbeat(f, stopHeartbeat)
+	}(f, stopHeartbeat)
+
+	for {
+		select {
+		case <-f.stopCh:
 			return
 		}
 	}
 }
 
+func (s *Server) replicateTo(f *follower) {
+	lastLogIndex, lastLogTerm := s.LastLog()
+	req := &AppendEntryRequest{
+		Term:              s.Term(),
+		Leader:            s.LocalAddress(),
+		PrevLogIndex:      lastLogIndex,
+		PrevLogTerm:       lastLogTerm,
+		LeaderCommitIndex: s.CommitIndex(),
+	}
+	if resp := s.Transport().SendAppendEntries(f.peer, req); resp != nil {
+
+	}
+}
+
+func (s *Server) heartbeat(f *follower, stopCh chan struct{}) {
+	ticker := time.NewTicker(DefaultHeartbeatInterval)
+
+	for {
+		select {
+		case <-stopCh:
+			s.debug("server.heartbeat.stop: %s -> %s", s.LocalAddress(), f.peer)
+			ticker.Stop()
+			return
+		case <-ticker.C:
+			s.debug("server.heartbeat.send: %s -> %s", s.LocalAddress(), f.peer)
+
+			s.replicateTo(f)
+		}
+	}
+}
+
 func (s *Server) processRPC(rpc RPC) {
-	s.debug("server.process.rpc %s : %+v", s.name, rpc)
+	s.debug("server.process.rpc %s : %+v", s.LocalAddress(), rpc)
 	switch cmd := rpc.Command.(type) {
 	case *AppendEntryRequest:
-		s.debug("server.entry.append.received: %s %+v", s.Name(), cmd)
+		s.debug("server.entry.append.received: %s %+v", s.LocalAddress(), cmd)
 		s.processAppendEntries(rpc, cmd)
+	case *AppendEntryResponse:
+		s.processAppendEntriesResponse(cmd)
 	case *RequestVoteRequest:
-		s.debug("server.vote.request.received %s %+v", s.Name(), cmd)
+		s.debug("server.vote.request.received %s %+v", s.LocalAddress(), cmd)
 		s.processRequestVote(rpc, cmd)
 	default:
 		s.err("server.command.error: unexpected command: %v", rpc.Command)
@@ -134,6 +202,7 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 
 	var err error
 	defer func() {
+		s.debug("server.entry.append.response: %+v", resp)
 		rpc.Response(resp, err)
 	}()
 
@@ -146,35 +215,33 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 		s.setState(Follower)
 		resp.Term = req.Term
 	}
-
 	s.setLeader(req.Leader)
-	s.debug("server.leader: %s %s", s.Name(), s.leader)
-	if req.PrevLogIndex > 0 {
-		lastLogIndex, lastLogTerm := s.LastLog()
-		var prevLogTerm uint64
-		if req.PrevLogIndex == lastLogIndex {
-			prevLogTerm = lastLogTerm
-		} else {
-			prevLog, err := s.logs.GetLog(req.PrevLogIndex)
-			if err != nil {
-				s.debug("failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
-				return
-			}
-			prevLogTerm = prevLog.Term
-		}
 
-		if req.PrevLogTerm != prevLogTerm {
-			s.debug("Previouse log term mis-match: current: %v request: %v", prevLogTerm, req.PrevLogTerm)
+	lastLogIndex, lastLogTerm := s.LastLog()
+	var prevLogTerm uint64
+	if req.PrevLogIndex == lastLogIndex {
+		prevLogTerm = lastLogTerm
+	} else {
+		prevLog, err := s.logs.GetLog(req.PrevLogIndex)
+		if err != nil {
+			s.debug("failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
 			return
 		}
+		prevLogTerm = prevLog.Term
+	}
+
+	if req.PrevLogTerm != prevLogTerm {
+		s.debug("server.entry.append: Previouse log term mis-match: current: %v request: %v", prevLogTerm, req.PrevLogTerm)
+		return
 	}
 
 	// Process any new entry
 	if n := len(req.Entries); n > 0 {
 		first := req.Entries[0]
 		last := req.Entries[n-1]
+		// s.debug("first: %+v, last: %+v", first, last)
 		lastLogIndex := s.LastLogIndex()
-		if first.Index < lastLogIndex {
+		if first.Index <= lastLogIndex {
 			s.debug("server.log.clear: from %d to %d", first.Index, lastLogIndex)
 			if err := s.logs.DeleteRange(first.Index, lastLogIndex); err != nil {
 				s.debug("server.logs.clear.failed: %v", err)
@@ -188,15 +255,16 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 		}
 
 		s.setLastLog(last.Index, last.Term)
+		resp.LastLogIndex = s.LastLogIndex()
+		// s.debug("server.entry.append: LastLogIndex: %v LastLogTerm: %v", last.Index, last.Term)
 	}
 
 	// Update commit index
-	if req.LeaderCommitIndex > 0 && req.LeaderCommitIndex > s.CommitIndex() {
-		if req.LeaderCommitIndex > s.LastLogIndex() {
-			s.setCommitIndex(s.LastLogIndex())
-		} else {
-			s.setCommitIndex(req.LeaderCommitIndex)
-		}
+	if req.LeaderCommitIndex > s.CommitIndex() {
+		idx := min(req.LeaderCommitIndex, s.LastLogIndex())
+		s.setCommitIndex(idx)
+		s.debug("server.commit.index: %v", s.CommitIndex())
+		// TODO: process log
 	}
 
 	resp.Success = true
@@ -220,60 +288,32 @@ func (s *Server) processAppendEntriesResponse(resp *AppendEntryResponse) {
 		return
 	}
 
-}
+	// if responses success, increase synced peers
+	s.syncedPeers++
 
-func (s *Server) sendAppendEntries(p *Peer, req *AppendEntryRequest) *AppendEntryResponse {
-	s.debug("server.entry.append: %s -> %s [prevLog: %v term:%v length: %v]", s.Name(), p.Name,
-		req.PrevLogIndex, req.PrevLogTerm, len(req.Entries))
-	if resp := s.Transport().SendAppendEntries(p, req); resp != nil {
-		return resp
+	// if entry not appended with major of server, return
+	if s.syncedPeers < s.QuorumSize() {
+		return
 	}
-	return nil
+
+	s.setCommitIndex(resp.LastLogIndex)
+
+	// TODO: process log
+
 }
 
-func (s *Server) replicate(p *Peer) {
-	p.stopCh = make(chan bool)
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		s.heartbeat(p)
-	}()
-}
+// func (s *Server) sendAppendEntries(p *Peer, req *AppendEntryRequest) *AppendEntryResponse {
+// 	s.debug("server.entry.append: %s -> %s [prevLog: %v term:%v length: %v]", s.LocalAddress(), p.Name,
+// 		req.PrevLogIndex, req.PrevLogTerm, len(req.Entries))
+// 	if resp := s.Transport().SendAppendEntries(p, req); resp != nil {
+// 		return resp
+// 	}
+// 	return nil
+// }
 
-func (s *Server) replicateTo(p *Peer) {
-}
-
-func (s *Server) stopHeartbeat(p *Peer) {
-	p.stopCh <- true
-}
-
-func (s *Server) heartbeat(p *Peer) {
-	lastLogIndex, lastLogTerm := s.LastLog()
-	ticker := time.NewTicker(DefaultHeartbeatInterval)
-
-	for {
-		select {
-		case <-p.stopCh:
-			s.debug("server.heartbeat.stop: %s -> %s", s.Name(), p.Name)
-			ticker.Stop()
-			return
-		case <-ticker.C:
-			s.debug("server.heartbeat.send: %s -> %s", s.Name(), p.Name)
-			req := &AppendEntryRequest{
-				Term:              s.Term(),
-				Leader:            s.Name(),
-				PrevLogIndex:      lastLogIndex,
-				PrevLogTerm:       lastLogTerm,
-				LeaderCommitIndex: s.CommitIndex(),
-			}
-			s.sendAppendEntries(p, req)
-		}
-	}
-}
-
-func (s *Server) sendVoteRequest(p *Peer, req *RequestVoteRequest, c chan *RequestVoteResponse) {
-	s.debug("server.vote.request: %s -> %s [%+v]", s.Name(), p.Name, req)
-	if resp := s.Transport().SendVoteRequest(p, req); resp != nil {
+func (s *Server) sendVoteRequest(peer string, req *RequestVoteRequest, c chan *RequestVoteResponse) {
+	s.debug("server.vote.request: %s -> %s [%+v]", s.LocalAddress(), peer, req)
+	if resp := s.Transport().SendVoteRequest(peer, req); resp != nil {
 		c <- resp
 	}
 }
@@ -308,7 +348,7 @@ func (s *Server) processRequestVote(rpc RPC, req *RequestVoteRequest) {
 
 	// If the candidate's log is not update-to-date, don't vote
 	lastIndex, lastTerm := s.LastLog()
-	s.debug("server.log.last: %s [Index: %v/Term: %v]", s.name, lastIndex, lastTerm)
+	s.debug("server.log.last: %s [Index: %v/Term: %v]", s.LocalAddress(), lastIndex, lastTerm)
 	if lastIndex > req.LastLogIndex || lastTerm > req.LastLogTerm {
 		s.debug("server.log.outdate: current: [Index: %v,Term: %v] : request: [Index: %v,Term: %v]", lastIndex,
 			lastTerm, req.LastLogIndex, req.LastLogTerm)

@@ -165,13 +165,13 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
 	transport := &testTransport{}
-	transport.sendVoteRequestFunc = func(peer *Peer, req *RequestVoteRequest) *RequestVoteResponse {
-		server := servers[peer.Name]
+	transport.sendVoteRequestFunc = func(peer string, req *RequestVoteRequest) *RequestVoteResponse {
+		server := servers[peer]
 		resp := requestVote(server, req)
 		return resp
 	}
-	transport.sendAppendEntriesFunc = func(peer *Peer, req *AppendEntryRequest) *AppendEntryResponse {
-		server := servers[peer.Name]
+	transport.sendAppendEntriesFunc = func(peer string, req *AppendEntryRequest) *AppendEntryResponse {
+		server := servers[peer]
 		resp := appendEntries(server, req)
 		return resp
 	}
@@ -198,43 +198,51 @@ func TestServerPromote(t *testing.T) {
 }
 
 // Append Entries
-func TestServerAppendEnties(t *testing.T) {
+func TestServerAppendEntries(t *testing.T) {
 	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
 
 	e1 := &Entry{Index: 1, Term: 1}
 	entries := []*Entry{e1}
-	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
+	resp := appendEntries(s, newAppendEntriesRequest(1, 0, 0, entries, "leader", 0))
 	if resp.Term != 1 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
-	}
-	if index, term := s.LastLog(); index != 0 || term != 0 {
-		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
 
-	e2 := &Entry{Index: 2, Term: 1}
-	e3 := &Entry{Index: 3, Term: 1}
-	entries = []*Entry{e2, e3}
-	resp = appendEntries(s, newAppendEntriesRequest(1, "leader", 1, 1, entries, 1))
-	if resp.Term != 1 || !resp.Success {
-		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
-	}
 	if index, term := s.LastLog(); index != 1 || term != 1 {
 		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
 	}
 
-	resp = appendEntries(s, newAppendEntriesRequest(2, "leader", 3, 1, []*Entry{}, 3))
+	// Append multiple entries and commit last one
+	e2 := &Entry{Index: 2, Term: 1}
+	e3 := &Entry{Index: 3, Term: 1}
+	entries = []*Entry{e2, e3}
+	resp = appendEntries(s, newAppendEntriesRequest(1, 1, 1, entries, "leader", 1))
+	if resp.Term != 1 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+	if index, term := s.LastLog(); index != 3 || term != 1 {
+		t.Fatalf("Invalid last log [index %v term %v]", index, term)
+	}
+
+	if s.CommitIndex() != 1 {
+		t.Fatalf("Invalid commit info %v", s.CommitIndex())
+	}
+
+	// send heartbeat and commit everything
+	resp = appendEntries(s, newAppendEntriesRequest(2, 3, 1, []*Entry{}, "leader", 3))
 
 	if resp.Term != 2 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
 	}
-	if index, term := s.LastLog(); index != 3 || term != 2 {
-		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+
+	if s.Term() != 2 {
+		t.Fatalf("invalid term %v", s.Term())
 	}
 }
 
-func TestServerRejectOlderTermAppendEntries(t *testing.T) {
+func TestServerAppendEntriesStaleTermRejected(t *testing.T) {
 	s := NewServer("test", &testTransport{}, &testLog{})
 	s.Start()
 	defer s.Stop()
@@ -242,7 +250,9 @@ func TestServerRejectOlderTermAppendEntries(t *testing.T) {
 
 	e := &Entry{Index: 1, Term: 1}
 	entries := []*Entry{e}
-	resp := appendEntries(s, newAppendEntriesRequest(1, "leader", 0, 0, entries, 0))
+
+	resp := appendEntries(s, newAppendEntriesRequest(1, 0, 0, entries, "leader", 0))
+
 	if resp.Term != 2 || resp.Success {
 		t.Fatalf("AppendEntries should be failed: %v/%v", resp.Term, resp.Success)
 	}
