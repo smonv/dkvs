@@ -165,12 +165,12 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 func TestServerPromote(t *testing.T) {
 	servers := map[string]*Server{}
 	transport := &testTransport{}
-	transport.sendVoteRequestFunc = func(peer string, req *RequestVoteRequest) *RequestVoteResponse {
+	transport.requestVoteFunc = func(peer string, req *RequestVoteRequest) *RequestVoteResponse {
 		server := servers[peer]
 		resp := requestVote(server, req)
 		return resp
 	}
-	transport.sendAppendEntriesFunc = func(peer string, req *AppendEntryRequest) *AppendEntryResponse {
+	transport.appendEntriesFunc = func(peer string, req *AppendEntryRequest) *AppendEntryResponse {
 		server := servers[peer]
 		resp := appendEntries(server, req)
 		return resp

@@ -154,7 +154,10 @@ func (s *Server) replicateTo(f *follower) {
 		PrevLogTerm:       lastLogTerm,
 		LeaderCommitIndex: s.CommitIndex(),
 	}
-	if resp := s.Transport().SendAppendEntries(f.peer, req); resp != nil {
+	if resp := s.Transport().AppendEntries(f.peer, req); resp != nil {
+		if resp.Success {
+
+		}
 
 	}
 }
@@ -313,7 +316,7 @@ func (s *Server) processAppendEntriesResponse(resp *AppendEntryResponse) {
 
 func (s *Server) sendVoteRequest(peer string, req *RequestVoteRequest, c chan *RequestVoteResponse) {
 	s.debug("server.vote.request: %s -> %s [%+v]", s.LocalAddress(), peer, req)
-	if resp := s.Transport().SendVoteRequest(peer, req); resp != nil {
+	if resp := s.Transport().RequestVote(peer, req); resp != nil {
 		c <- resp
 	}
 }
