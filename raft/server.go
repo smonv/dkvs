@@ -47,8 +47,10 @@ type Server struct {
 	stopCh chan bool
 
 	// leader only
+	applyCh  chan *Log
+	applying map[uint64]*Log
 	// channel receive commit log
-	commitCh chan struct{}
+	commitCh chan *Log
 }
 
 // NewServer is used to create new Raft server
@@ -119,6 +121,10 @@ func (s *Server) AddPeer(peer string) error {
 
 func (s *Server) debug(format string, v ...interface{}) {
 	s.logger.Printf("[DEBUG] "+format, v...)
+}
+
+func (s *Server) warn(format string, v ...interface{}) {
+	s.logger.Printf("[WARN] "+format, v...)
 }
 
 func (s *Server) err(format string, v ...interface{}) {

@@ -1,7 +1,7 @@
 package raft
 
 type testLog struct {
-	entries []*Entry
+	entries []*Log
 }
 
 func (t *testLog) FirstIndex() (uint64, error) {
@@ -16,7 +16,7 @@ func (t *testLog) LastIndex() (uint64, error) {
 	return 0, nil
 }
 
-func (t *testLog) GetLog(index uint64) (*Entry, error) {
+func (t *testLog) GetLog(index uint64) (*Log, error) {
 	for _, entry := range t.entries {
 		if entry.Index == index {
 			return entry, nil
@@ -25,12 +25,12 @@ func (t *testLog) GetLog(index uint64) (*Entry, error) {
 	return nil, nil
 }
 
-func (t *testLog) SetLog(entry *Entry) error {
+func (t *testLog) SetLog(entry *Log) error {
 	t.entries = append(t.entries, entry)
 	return nil
 }
 
-func (t *testLog) SetLogs(entries []*Entry) error {
+func (t *testLog) SetLogs(entries []*Log) error {
 	for _, entry := range entries {
 		t.entries = append(t.entries, entry)
 	}

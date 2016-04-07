@@ -25,3 +25,10 @@ func max(a, b uint64) uint64 {
 	}
 	return b
 }
+
+func asyncNotifyCh(ch chan struct{}) {
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
+}

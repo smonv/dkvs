@@ -96,6 +96,7 @@ func (s *Server) runAsCandidate() {
 func (s *Server) runAsLeader() {
 	s.debug("server.state: %s as %s", s.LocalAddress(), s.State().String())
 	s.followers = make(map[string]*follower)
+	s.applying = make(map[uint64]*Log)
 	// send heartbeat to notify leadership
 	for _, peer := range s.peers {
 		s.startReplication(peer)
@@ -110,7 +111,33 @@ func (s *Server) runAsLeader() {
 			return
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
+		case newLog := <-s.applyCh:
+			s.dispatchLog(newLog)
+		case commitLog := <-s.commitCh:
+			// TODO: process log
+			s.setCommitIndex(commitLog.Index)
 		}
+	}
+}
+
+func (s *Server) dispatchLog(applyLog *Log) {
+	currentTerm := s.Term()
+	lastLogIndex := s.LastLogIndex()
+
+	applyLog.Term = currentTerm
+	applyLog.Index = lastLogIndex + 1
+	applyLog.majorityQuorum = s.QuorumSize()
+	applyLog.count = 0
+
+	if err := s.logs.SetLog(applyLog); err != nil {
+		return
+	}
+
+	s.applying[applyLog.Index] = applyLog
+
+	s.setLastLog(lastLogIndex+1, currentTerm)
+	for _, f := range s.followers {
+		asyncNotifyCh(f.replicateCh)
 	}
 }
 
@@ -121,62 +148,12 @@ func (s *Server) startReplication(peer string) {
 		currentTerm: s.Term(),
 		matchIndex:  0,
 		nextIndex:   lastLogIndex + 1,
+		replicateCh: make(chan struct{}),
 		stopCh:      make(chan bool),
 	}
 
 	s.followers[peer] = f
 	go s.replicate(f)
-}
-
-func (s *Server) replicate(f *follower) {
-	stopHeartbeat := make(chan struct{})
-	defer close(stopHeartbeat)
-	s.wg.Add(1)
-	go func(f *follower, stopHeartbeat chan struct{}) {
-		defer s.wg.Done()
-		s.heartbeat(f, stopHeartbeat)
-	}(f, stopHeartbeat)
-
-	for {
-		select {
-		case <-f.stopCh:
-			return
-		}
-	}
-}
-
-func (s *Server) replicateTo(f *follower) {
-	lastLogIndex, lastLogTerm := s.LastLog()
-	req := &AppendEntryRequest{
-		Term:              s.Term(),
-		Leader:            s.LocalAddress(),
-		PrevLogIndex:      lastLogIndex,
-		PrevLogTerm:       lastLogTerm,
-		LeaderCommitIndex: s.CommitIndex(),
-	}
-	if resp := s.Transport().AppendEntries(f.peer, req); resp != nil {
-		if resp.Success {
-
-		}
-
-	}
-}
-
-func (s *Server) heartbeat(f *follower, stopCh chan struct{}) {
-	ticker := time.NewTicker(DefaultHeartbeatInterval)
-
-	for {
-		select {
-		case <-stopCh:
-			s.debug("server.heartbeat.stop: %s -> %s", s.LocalAddress(), f.peer)
-			ticker.Stop()
-			return
-		case <-ticker.C:
-			s.debug("server.heartbeat.send: %s -> %s", s.LocalAddress(), f.peer)
-
-			s.replicateTo(f)
-		}
-	}
 }
 
 func (s *Server) processRPC(rpc RPC) {

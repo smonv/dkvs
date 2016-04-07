@@ -1,6 +1,7 @@
 package raft
 
 import (
+	"fmt"
 	"testing"
 	"time"
 )
@@ -83,12 +84,12 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 }
 
 func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
-	e1 := &Entry{Index: 1, Term: 1}
-	e2 := &Entry{Index: 2, Term: 1}
-	e3 := &Entry{Index: 3, Term: 2}
+	e1 := &Log{Index: 1, Term: 1}
+	e2 := &Log{Index: 2, Term: 1}
+	e3 := &Log{Index: 3, Term: 2}
 
 	s := NewServer("test", &testTransport{}, &testLog{})
-	s.logs.SetLogs([]*Entry{e1, e2, e3})
+	s.logs.SetLogs([]*Log{e1, e2, e3})
 	lastIndex, _ := s.logs.LastIndex()
 	lastLog, _ := s.logs.GetLog(lastIndex)
 	s.setLastLog(lastLog.Index, lastLog.Term)
@@ -203,8 +204,8 @@ func TestServerAppendEntries(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	e1 := &Entry{Index: 1, Term: 1}
-	entries := []*Entry{e1}
+	e1 := &Log{Index: 1, Term: 1}
+	entries := []*Log{e1}
 	resp := appendEntries(s, newAppendEntriesRequest(1, 0, 0, entries, "leader", 0))
 	if resp.Term != 1 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -215,9 +216,9 @@ func TestServerAppendEntries(t *testing.T) {
 	}
 
 	// Append multiple entries and commit last one
-	e2 := &Entry{Index: 2, Term: 1}
-	e3 := &Entry{Index: 3, Term: 1}
-	entries = []*Entry{e2, e3}
+	e2 := &Log{Index: 2, Term: 1}
+	e3 := &Log{Index: 3, Term: 1}
+	entries = []*Log{e2, e3}
 	resp = appendEntries(s, newAppendEntriesRequest(1, 1, 1, entries, "leader", 1))
 	if resp.Term != 1 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -231,7 +232,7 @@ func TestServerAppendEntries(t *testing.T) {
 	}
 
 	// send heartbeat and commit everything
-	resp = appendEntries(s, newAppendEntriesRequest(2, 3, 1, []*Entry{}, "leader", 3))
+	resp = appendEntries(s, newAppendEntriesRequest(2, 3, 1, []*Log{}, "leader", 3))
 
 	if resp.Term != 2 || !resp.Success {
 		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
@@ -248,8 +249,8 @@ func TestServerAppendEntriesStaleTermRejected(t *testing.T) {
 	defer s.Stop()
 	s.setTerm(2)
 
-	e := &Entry{Index: 1, Term: 1}
-	entries := []*Entry{e}
+	e := &Log{Index: 1, Term: 1}
+	entries := []*Log{e}
 
 	resp := appendEntries(s, newAppendEntriesRequest(1, 0, 0, entries, "leader", 0))
 
@@ -259,5 +260,79 @@ func TestServerAppendEntriesStaleTermRejected(t *testing.T) {
 
 	if index, term := s.LastLog(); index != 0 || term != 0 {
 		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+	}
+}
+
+func TestMultiNode(t *testing.T) {
+	servers := map[string]*Server{}
+	transport := &testTransport{}
+	transport.requestVoteFunc = func(peer string, req *RequestVoteRequest) *RequestVoteResponse {
+		server := servers[peer]
+		resp := requestVote(server, req)
+		return resp
+	}
+	transport.appendEntriesFunc = func(peer string, req *AppendEntryRequest) *AppendEntryResponse {
+		server := servers[peer]
+		resp := appendEntries(server, req)
+		return resp
+	}
+
+	logs := &testLog{}
+
+	cluster := newTestCluster([]string{"s1", "s2", "s3"}, transport, logs, servers)
+
+	for _, s := range cluster {
+		s.Start()
+	}
+
+	defer func() {
+		for _, s := range cluster {
+			s.Stop()
+		}
+	}()
+
+	time.Sleep(2 * testElectionTimeout)
+	var leader *Server
+	if cluster[0].State() == Leader {
+		leader = cluster[0]
+	}
+
+	if cluster[1].State() == Leader {
+		leader = cluster[1]
+	}
+	if cluster[2].State() == Leader {
+		leader = cluster[2]
+	}
+	fmt.Println("current leader: ", leader.LocalAddress())
+
+	e := &Log{Data: []byte("Test Command")}
+	leader.dispatchLog(e)
+
+	time.Sleep(2 * testElectionTimeout)
+	if leader.CommitIndex() != 1 {
+		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
+	}
+	time.Sleep(testElectionTimeout)
+	for _, s := range cluster {
+		if s.CommitIndex() != 1 {
+			t.Fatalf("wrong commit on server %v", s.LocalAddress())
+		}
+	}
+
+	e2 := &Log{Data: []byte("Test 2")}
+	e3 := &Log{Data: []byte("Test 3")}
+
+	leader.dispatchLog(e2)
+	leader.dispatchLog(e3)
+
+	time.Sleep(2 * testElectionTimeout)
+	if leader.CommitIndex() != 3 {
+		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
+	}
+	time.Sleep(testElectionTimeout)
+	for _, s := range cluster {
+		if s.CommitIndex() != 3 {
+			t.Fatalf("wrong commit on server %v", s.LocalAddress())
+		}
 	}
 }
