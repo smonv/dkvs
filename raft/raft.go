@@ -1,7 +1,7 @@
 package raft
 
 import (
-	"fmt"
+	"errors"
 	"time"
 )
 
@@ -30,16 +30,16 @@ func (s *Server) run() {
 func (s *Server) runAsFollower() {
 	s.debug("server.state: %s enter %s", s.LocalAddress(), s.State().String())
 
-	electionTimeout := time.NewTimer(randomDuration(ElectionTimeout))
+	electionTimeout := time.NewTimer(randomDuration(DefaultElectionTimeout))
 
 	for s.State() == Follower {
 		select {
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
-			electionTimeout.Reset(randomDuration(ElectionTimeout))
+			electionTimeout.Reset(randomDuration(DefaultElectionTimeout))
 		case <-electionTimeout.C:
 			s.setState(Candidate)
-			electionTimeout.Reset(randomDuration(ElectionTimeout))
+			electionTimeout.Reset(randomDuration(DefaultElectionTimeout))
 		case <-s.stopCh:
 			electionTimeout.Stop()
 			s.setState(Stopped)
@@ -66,7 +66,7 @@ func (s *Server) runAsCandidate() {
 				}(peer)
 			}
 			votesGranted = 1
-			electionTimeout = time.NewTimer(randomDuration(ElectionTimeout))
+			electionTimeout = time.NewTimer(randomDuration(DefaultElectionTimeout))
 			doVote = false
 		}
 		// If receive enough vote, stop waiting and promote to leader
@@ -97,6 +97,8 @@ func (s *Server) runAsLeader() {
 	s.debug("server.state: %s as %s", s.LocalAddress(), s.State().String())
 	s.followers = make(map[string]*follower)
 	s.applying = make(map[uint64]*Log)
+	s.applyCh = make(chan *Log)
+	s.commitCh = make(chan *Log)
 	// send heartbeat to notify leadership
 	for _, peer := range s.peers {
 		s.startReplication(peer)
@@ -115,6 +117,7 @@ func (s *Server) runAsLeader() {
 			s.dispatchLog(newLog)
 		case commitLog := <-s.commitCh:
 			// TODO: process log
+			s.debug("server.log.commit: index %d", commitLog.Index)
 			s.setCommitIndex(commitLog.Index)
 		}
 	}
@@ -160,16 +163,14 @@ func (s *Server) processRPC(rpc RPC) {
 	s.debug("server.process.rpc %s : %+v", s.LocalAddress(), rpc)
 	switch cmd := rpc.Command.(type) {
 	case *AppendEntryRequest:
-		s.debug("server.entry.append.received: %s %+v", s.LocalAddress(), cmd)
+		// s.debug("server.entry.append.received: %s %+v", s.LocalAddress(), cmd)
 		s.processAppendEntries(rpc, cmd)
-	case *AppendEntryResponse:
-		s.processAppendEntriesResponse(cmd)
 	case *RequestVoteRequest:
-		s.debug("server.vote.request.received %s %+v", s.LocalAddress(), cmd)
+		// s.debug("server.vote.request.received %s %+v", s.LocalAddress(), cmd)
 		s.processRequestVote(rpc, cmd)
 	default:
 		s.err("server.command.error: unexpected command: %v", rpc.Command)
-		rpc.Response(nil, fmt.Errorf("unexpected command"))
+		rpc.Response(nil, errors.New("Unxepected Command"))
 	}
 }
 
@@ -198,10 +199,13 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	s.setLeader(req.Leader)
 
 	lastLogIndex, lastLogTerm := s.LastLog()
+
 	var prevLogTerm uint64
+
 	if req.PrevLogIndex == lastLogIndex {
 		prevLogTerm = lastLogTerm
 	} else {
+		s.debug("prevLogIdx: %d", req.PrevLogIndex)
 		prevLog, err := s.logs.GetLog(req.PrevLogIndex)
 		if err != nil {
 			s.debug("failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
@@ -219,12 +223,12 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	if n := len(req.Entries); n > 0 {
 		first := req.Entries[0]
 		last := req.Entries[n-1]
-		// s.debug("first: %+v, last: %+v", first, last)
+
 		lastLogIndex := s.LastLogIndex()
 		if first.Index <= lastLogIndex {
 			s.debug("server.log.clear: from %d to %d", first.Index, lastLogIndex)
 			if err := s.logs.DeleteRange(first.Index, lastLogIndex); err != nil {
-				s.debug("server.logs.clear.failed: %v", err)
+				s.debug("server.logs.clear: Failed: from %d to %d. Error  %v", first.Index, lastLogIndex, err)
 				return
 			}
 		}
@@ -250,46 +254,6 @@ func (s *Server) processAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	resp.Success = true
 	return
 }
-
-func (s *Server) processAppendEntriesResponse(resp *AppendEntryResponse) {
-	// only process when server is leader
-	if s.State() != Leader {
-		return
-	}
-
-	// If find higher term, step down and exit
-	if resp.Term > s.Term() {
-		s.setState(Follower)
-		s.setTerm(resp.Term)
-		return
-	}
-
-	if !resp.Success {
-		return
-	}
-
-	// if responses success, increase synced peers
-	s.syncedPeers++
-
-	// if entry not appended with major of server, return
-	if s.syncedPeers < s.QuorumSize() {
-		return
-	}
-
-	s.setCommitIndex(resp.LastLogIndex)
-
-	// TODO: process log
-
-}
-
-// func (s *Server) sendAppendEntries(p *Peer, req *AppendEntryRequest) *AppendEntryResponse {
-// 	s.debug("server.entry.append: %s -> %s [prevLog: %v term:%v length: %v]", s.LocalAddress(), p.Name,
-// 		req.PrevLogIndex, req.PrevLogTerm, len(req.Entries))
-// 	if resp := s.Transport().SendAppendEntries(p, req); resp != nil {
-// 		return resp
-// 	}
-// 	return nil
-// }
 
 func (s *Server) sendVoteRequest(peer string, req *RequestVoteRequest, c chan *RequestVoteResponse) {
 	s.debug("server.vote.request: %s -> %s [%+v]", s.LocalAddress(), peer, req)

@@ -82,6 +82,9 @@ func (s *Server) replicateTo(f *follower) {
 		}
 		req.Entries = append(req.Entries, log)
 	}
+	if len(req.Entries) > 0 {
+		s.debug("server.entry.append: %s -> %s [%+v]", s.LocalAddress(), f.peer, req)
+	}
 
 	resp := s.Transport().AppendEntries(f.peer, req)
 	if resp != nil {
@@ -137,6 +140,5 @@ func (s *Server) commit(index uint64) {
 	delete(s.applying, index)
 	s.mutex.Unlock()
 
-	s.setCommitIndex(index)
-	//s.commitCh <- log
+	s.commitCh <- log
 }

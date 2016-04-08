@@ -1,7 +1,6 @@
 package raft
 
 import (
-	"fmt"
 	"testing"
 	"time"
 )
@@ -157,7 +156,7 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 	s.Start()
 	defer s.Stop()
 
-	time.Sleep(2 * ElectionTimeout * time.Millisecond)
+	time.Sleep(2 * DefaultElectionTimeout * time.Millisecond)
 	if s.State() != Leader {
 		t.Fatalf("Server not promote to leader")
 	}
@@ -303,10 +302,10 @@ func TestMultiNode(t *testing.T) {
 	if cluster[2].State() == Leader {
 		leader = cluster[2]
 	}
-	fmt.Println("current leader: ", leader.LocalAddress())
+	leader.debug("cluster.leader.current: %v", leader.LocalAddress())
 
 	e := &Log{Data: []byte("Test Command")}
-	leader.dispatchLog(e)
+	leader.applyCh <- e
 
 	time.Sleep(2 * testElectionTimeout)
 	if leader.CommitIndex() != 1 {
@@ -322,8 +321,8 @@ func TestMultiNode(t *testing.T) {
 	e2 := &Log{Data: []byte("Test 2")}
 	e3 := &Log{Data: []byte("Test 3")}
 
-	leader.dispatchLog(e2)
-	leader.dispatchLog(e3)
+	leader.applyCh <- e2
+	leader.applyCh <- e3
 
 	time.Sleep(2 * testElectionTimeout)
 	if leader.CommitIndex() != 3 {

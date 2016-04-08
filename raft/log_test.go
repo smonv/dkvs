@@ -1,5 +1,7 @@
 package raft
 
+import "errors"
+
 type testLog struct {
 	entries []*Log
 }
@@ -22,7 +24,7 @@ func (t *testLog) GetLog(index uint64) (*Log, error) {
 			return entry, nil
 		}
 	}
-	return nil, nil
+	return nil, errors.New("failed to get log")
 }
 
 func (t *testLog) SetLog(entry *Log) error {

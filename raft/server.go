@@ -10,10 +10,10 @@ import (
 const (
 	// DefaultHeartbeatInterval is the interval that the leader will send
 	// AppendEntriesRequests to followers to maintain leadership.
-	DefaultHeartbeatInterval = 50 * time.Millisecond
+	DefaultHeartbeatInterval = 75 * time.Millisecond
 
-	// ElectionTimeout is the interval that follower will promote to Candidate
-	ElectionTimeout = 150
+	// DefaultElectionTimeout is the interval that follower will promote to Candidate
+	DefaultElectionTimeout = 150
 )
 
 // Server is provide Raft server information
@@ -35,22 +35,22 @@ type Server struct {
 	lastLogTerm  uint64
 	commitIndex  uint64
 
-	peers       []string
-	followers   map[string]*follower
-	syncedPeers int
-
-	logger *log.Logger
-	mutex  sync.RWMutex
-	wg     sync.WaitGroup
-
-	// channel receive stop signal
-	stopCh chan bool
+	peers     []string
+	followers map[string]*follower
 
 	// leader only
 	applyCh  chan *Log
 	applying map[uint64]*Log
-	// channel receive commit log
 	commitCh chan *Log
+
+	logger      *log.Logger
+	enableDebug bool
+
+	mutex sync.RWMutex
+	wg    sync.WaitGroup
+
+	// channel receive stop signal
+	stopCh chan bool
 }
 
 // NewServer is used to create new Raft server
@@ -65,6 +65,7 @@ func NewServer(localAddr string, transport Transport, logs LogStore) *Server {
 		transport:   transport,
 		peers:       []string{},
 		logger:      log.New(os.Stdout, "", log.LstdFlags),
+		enableDebug: true,
 	}
 
 	lastIndex, _ := s.logs.LastIndex()
@@ -120,7 +121,9 @@ func (s *Server) AddPeer(peer string) error {
 }
 
 func (s *Server) debug(format string, v ...interface{}) {
-	s.logger.Printf("[DEBUG] "+format, v...)
+	if s.enableDebug {
+		s.logger.Printf("[DEBUG] "+format, v...)
+	}
 }
 
 func (s *Server) warn(format string, v ...interface{}) {
