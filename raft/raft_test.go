@@ -6,11 +6,11 @@ import (
 )
 
 const (
-	testElectionTimeout = 200 * time.Millisecond
+	testElectionTimeout = 150 * time.Millisecond
 )
 
 func TestRaftServerStartAsFollower(t *testing.T) {
-	s := NewServer("raft", DefaultConfig(), NewTestTranport())
+	s := NewTestServer()
 	s.Start()
 	defer s.Stop()
 
@@ -19,15 +19,106 @@ func TestRaftServerStartAsFollower(t *testing.T) {
 	}
 }
 
-func TestRaftServerBecomeCandidateAfterElectionTimeout(t *testing.T) {
-	s := NewServer("raft", DefaultConfig(), NewTestTranport())
+func TestRaftServerRequestVote(t *testing.T) {
+	s := NewTestServer()
+
 	s.Start()
 	defer s.Stop()
 
-	time.Sleep(2 * s.config.ElectionTimeout * time.Millisecond)
+	req := newVoteRequest(1, "foo", 0, 0)
 
-	if s.State() != Candidate {
-		t.Fatalf("Raft server not become candidate")
+	var resp RequestVoteResponse
+	err := s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
+	}
+	if resp.Term != 1 || !resp.Granted {
+		t.Fatalf("invalid request vote response")
+	}
+}
+
+func TestServerRequestVoteDeniedForSmallTerm(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+
+	s.setCurrentTerm(2)
+	req := newVoteRequest(1, "foo", 1, 0)
+
+	var resp RequestVoteResponse
+	err := s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
 	}
 
+	if resp.Term != 2 || resp.Granted {
+		t.Fatalf("invalid request vote response %v/%v", resp.Term, resp.Granted)
+	}
+	if s.CurrentTerm() != 2 || s.State() != Follower {
+		t.Fatalf("Server did not update term and state: %v/%v", s.CurrentTerm(), s.State())
+	}
+}
+
+func TestServerRequestVoteDeniedIfAlreadyVoted(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+
+	s.setCurrentTerm(2)
+
+	req := newVoteRequest(2, "foo", 1, 0)
+
+	var resp RequestVoteResponse
+	err := s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
+	}
+
+	if resp.Term != 2 || !resp.Granted {
+		t.Fatalf("First vote should not be denied")
+	}
+	req = newVoteRequest(2, "bar", 1, 0)
+
+	err = s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
+	}
+
+	if resp.Term != 2 || resp.Granted {
+		t.Fatalf("Second vote should be denied")
+	}
+}
+
+func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+
+	s.setCurrentTerm(2)
+	req := newVoteRequest(2, "foo", 1, 0)
+	var resp RequestVoteResponse
+
+	err := s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
+	}
+
+	if resp.Term != 2 || !resp.Granted {
+		t.Fatalf("First vote should not be denied")
+	}
+	req = newVoteRequest(3, "bar", 1, 0)
+
+	err = s.Transport().RequestVote(s.Transport().LocalAddr(), req, &resp)
+
+	if err != nil {
+		t.Fatalf("Failed to sent request vote")
+	}
+
+	if resp.Term != 3 || !resp.Granted || s.VotedFor() != "bar" {
+		t.Fatalf("Second vote should not be denied")
+	}
 }

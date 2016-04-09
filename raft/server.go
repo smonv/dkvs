@@ -26,16 +26,16 @@ type Server struct {
 	sync.Mutex
 }
 
-func NewServer(localAddr string, config *Config, transport Transport) *Server {
+func NewServer(config *Config, transport Transport) *Server {
 	s := &Server{
-		localAddr:    localAddr,
+		localAddr:    transport.LocalAddr(),
 		currentTerm:  0,
 		state:        Stopped,
 		votedFor:     "",
 		leader:       "",
 		config:       config,
 		transport:    transport,
-		rpcCh:        make(chan RPC),
+		rpcCh:        transport.Consumer(),
 		lastLogIndex: 0,
 		lastLogTerm:  0,
 		commitIndex:  0,
