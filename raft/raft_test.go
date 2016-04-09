@@ -122,3 +122,14 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 		t.Fatalf("Second vote should not be denied")
 	}
 }
+
+func TestServerSelfPromoteToLeader(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+
+	time.Sleep(2 * testElectionTimeout)
+	if s.State() != Leader {
+		t.Fatalf("Server not promote to leader")
+	}
+}
