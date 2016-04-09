@@ -7,8 +7,8 @@ import (
 
 // Config provide any necessary config for Raft node
 type Config struct {
-	HeartbeatTimeout int
-	ElectionTimeout  int
+	HeartbeatTimeout int64
+	ElectionTimeout  int64
 	Logger           *log.Logger
 }
 

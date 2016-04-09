@@ -1,5 +1,7 @@
 package raft
 
+import "time"
+
 // Start is used to start Raft server
 func (s *Server) Start() {
 	s.stopCh = make(chan struct{})
@@ -40,7 +42,18 @@ func (s *Server) run() {
 }
 
 func (s *Server) runAsFollower() {
-
+	electionTimeout := time.NewTimer(randomDuration(s.config.HeartbeatTimeout))
+	for s.State() == Follower {
+		select {
+		case rpc := <-s.rpcCh:
+			s.processRPC(rpc)
+		case <-electionTimeout.C:
+			s.setLeader("")
+			s.setState(Candidate)
+		case <-s.stopCh:
+			return
+		}
+	}
 }
 
 func (s *Server) runAsCandidate() {
@@ -48,5 +61,9 @@ func (s *Server) runAsCandidate() {
 }
 
 func (s *Server) runAsLeader() {
+
+}
+
+func (s *Server) processRPC(rpc RPC) {
 
 }
