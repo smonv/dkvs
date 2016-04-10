@@ -123,6 +123,50 @@ func TestServerRequestVoteApprovedIfAlreadyVotedInOlderTerm(t *testing.T) {
 	}
 }
 
+func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
+	e1 := &Log{Index: 1, Term: 1}
+	e2 := &Log{Index: 2, Term: 1}
+	e3 := &Log{Index: 3, Term: 2}
+	s := NewTestServer()
+	s.logStore.SetLogs([]*Log{e1, e2, e3})
+	lastLogIdx, _ := s.logStore.LastIndex()
+	lastLog, _ := s.logStore.GetLog(lastLogIdx)
+	s.setLastLogInfo(lastLog.Index, lastLog.Term)
+
+	s.Start()
+	defer s.Stop()
+	if lastIdx, lastTerm := s.LastLogInfo(); lastIdx != 3 || lastTerm != 2 {
+		t.Fatalf("Wrong last log. Idx: %v. Term %v", lastIdx, lastTerm)
+	}
+
+	req := newVoteRequest(3, "foo", 2, 2)
+	var resp RequestVoteResponse
+	_ = s.Transport().RequestVote(s.LocalAddr(), req, &resp)
+	if resp.Term != 3 || resp.Granted {
+		t.Fatalf("Behind index should have been denied [%v/%v]", resp.Term, resp.Granted)
+	}
+
+	req = newVoteRequest(2, "foo", 3, 2)
+	_ = s.Transport().RequestVote(s.LocalAddr(), req, &resp)
+	if resp.Term != 3 || resp.Granted {
+		t.Fatalf("Behind term should have been denied [%v/%v]", resp.Term, resp.Granted)
+	}
+
+	req = newVoteRequest(3, "foo", 3, 2)
+
+	_ = s.Transport().RequestVote(s.LocalAddr(), req, &resp)
+	if resp.Term != 3 || !resp.Granted {
+		t.Fatalf("Matching log vote should have been granted")
+	}
+
+	req = newVoteRequest(3, "foo", 4, 2)
+
+	_ = s.Transport().RequestVote(s.LocalAddr(), req, &resp)
+	if resp.Term != 3 || !resp.Granted {
+		t.Fatalf("Ahead log vote should have been granted")
+	}
+}
+
 func TestServerSelfPromoteToLeader(t *testing.T) {
 	s := NewTestServer()
 	s.Start()
