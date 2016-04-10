@@ -105,6 +105,8 @@ func (s *Server) runAsCandidate() {
 func (s *Server) runAsLeader() {
 	s.debug("Server %s enter %s state", s.LocalAddr(), s.State().String())
 	s.followers = make(map[string]*follower)
+	s.applying = make(map[uint64]*Log)
+	s.applyCh = make(chan *Log)
 
 	// send heartbeat to notify leadership
 	for _, peer := range s.peers {
@@ -121,6 +123,8 @@ func (s *Server) runAsLeader() {
 		select {
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
+		case newLog := <-s.applyCh:
+			s.dispatchLog(newLog)
 		case <-s.stopCh:
 			return
 		}
@@ -142,6 +146,28 @@ func (s *Server) startReplication(peer string) {
 	go s.replicate(f)
 }
 
+func (s *Server) dispatchLog(applyLog *Log) {
+	currentTerm := s.CurrentTerm()
+	lastLogIndex := s.LastLogIndex()
+
+	applyLog.Term = currentTerm
+	applyLog.Index = lastLogIndex + 1
+	applyLog.majorityQuorum = s.QuorumSize()
+	applyLog.count = 0
+
+	if err := s.logStore.SetLog(applyLog); err != nil {
+		s.err("%v", err)
+		return
+	}
+
+	s.applying[applyLog.Index] = applyLog
+
+	s.setLastLogInfo(lastLogIndex+1, currentTerm)
+	for _, f := range s.followers {
+		asyncNotifyCh(f.replicateCh)
+	}
+}
+
 func (s *Server) processRPC(rpc RPC) {
 	switch req := rpc.Request.(type) {
 	case *AppendEntryRequest:
@@ -156,6 +182,7 @@ func (s *Server) processRPC(rpc RPC) {
 }
 
 func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
+	s.debug("AE.Request: %+v", req)
 	resp := &AppendEntryResponse{
 		Term:         s.CurrentTerm(),
 		LastLogIndex: s.LastLogIndex(),
@@ -164,7 +191,7 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 
 	var err error
 	defer func() {
-		// s.debug("server.entry.append.response: %+v", resp)
+		s.debug("AE.Response: %+v", resp)
 		rpc.Response(resp, err)
 	}()
 

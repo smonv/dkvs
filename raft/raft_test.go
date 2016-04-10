@@ -203,3 +203,128 @@ func TestClusterPromote(t *testing.T) {
 		t.Fatalf("Cannot elect leader")
 	}
 }
+
+// Append Entries
+func TestServerAppendEntries(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+
+	e1 := &Log{Index: 1, Term: 1}
+	entries := []*Log{e1}
+	req := newAppendEntriesRequest(1, 0, 0, entries, "leader", 0)
+	var resp AppendEntryResponse
+	_ = s.Transport().AppendEntries(s.LocalAddr(), req, &resp)
+
+	if resp.Term != 1 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+
+	if index, term := s.LastLogInfo(); index != 1 || term != 1 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+	}
+
+	// Append multiple entries and commit last one
+	e2 := &Log{Index: 2, Term: 1}
+	e3 := &Log{Index: 3, Term: 1}
+	entries = []*Log{e2, e3}
+	req = newAppendEntriesRequest(1, 1, 1, entries, "leader", 1)
+
+	_ = s.Transport().AppendEntries(s.LocalAddr(), req, &resp)
+	if resp.Term != 1 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+	if index, term := s.LastLogInfo(); index != 3 || term != 1 {
+		t.Fatalf("Invalid last log [index %v term %v]", index, term)
+	}
+
+	if s.CommitIndex() != 1 {
+		t.Fatalf("Invalid commit info %v", s.CommitIndex())
+	}
+
+	// send heartbeat and commit everything
+	req = newAppendEntriesRequest(2, 3, 1, []*Log{}, "leader", 3)
+
+	_ = s.Transport().AppendEntries(s.LocalAddr(), req, &resp)
+	if resp.Term != 2 || !resp.Success {
+		t.Fatalf("AppendEntries failed: %v/%v", resp.Term, resp.Success)
+	}
+
+	if s.CurrentTerm() != 2 {
+		t.Fatalf("invalid term %v", s.CurrentTerm())
+	}
+}
+
+func TestServerAppendEntriesStaleTermRejected(t *testing.T) {
+	s := NewTestServer()
+	s.Start()
+	defer s.Stop()
+	s.setCurrentTerm(2)
+
+	e := &Log{Index: 1, Term: 1}
+	entries := []*Log{e}
+	req := newAppendEntriesRequest(1, 0, 0, entries, "leader", 0)
+	var resp AppendEntryResponse
+
+	_ = s.Transport().AppendEntries(s.LocalAddr(), req, &resp)
+
+	if resp.Term != 2 || resp.Success {
+		t.Fatalf("AppendEntries should be failed: %v/%v", resp.Term, resp.Success)
+	}
+
+	if index, term := s.LastLogInfo(); index != 0 || term != 0 {
+		t.Fatalf("Invalid commit info [index %v term %v]", index, term)
+	}
+}
+
+func TestMultiNode(t *testing.T) {
+	cluster := NewTestCluster(3)
+	for _, server := range cluster {
+		server.Start()
+	}
+	defer func() {
+		for _, server := range cluster {
+			server.Stop()
+		}
+	}()
+
+	time.Sleep(2 * testElectionTimeout)
+	var leader *Server
+	for _, server := range cluster {
+		if server.State() == Leader {
+			leader = server
+		}
+	}
+	e := &Log{Data: []byte("Test Command")}
+	leader.dispatchLog(e)
+
+	time.Sleep(2 * testElectionTimeout)
+	if leader.CommitIndex() != 1 {
+		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
+	}
+
+	time.Sleep(testElectionTimeout)
+
+	for _, s := range cluster {
+		if s.CommitIndex() != 1 {
+			t.Fatalf("wrong commit on server %v", s.LocalAddr())
+		}
+	}
+
+	e2 := &Log{Data: []byte("Test 2")}
+	e3 := &Log{Data: []byte("Test 3")}
+
+	leader.dispatchLog(e2)
+	leader.dispatchLog(e3)
+
+	time.Sleep(2 * testElectionTimeout)
+	if leader.CommitIndex() != 3 {
+		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
+	}
+	time.Sleep(testElectionTimeout)
+	for _, s := range cluster {
+		if s.CommitIndex() != 3 {
+			t.Fatalf("wrong commit on server %v", s.LocalAddr())
+		}
+	}
+}

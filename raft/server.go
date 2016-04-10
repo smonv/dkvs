@@ -22,6 +22,10 @@ type Server struct {
 	peers     []string
 	followers map[string]*follower
 
+	// leader working channel
+	applyCh  chan *Log
+	applying map[uint64]*Log
+
 	stopCh chan struct{}
 
 	wg sync.WaitGroup

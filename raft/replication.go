@@ -84,16 +84,21 @@ func (s *Server) replicateTo(f *follower) {
 	}
 
 	var resp AppendEntryResponse
-	err := s.Transport().AppendEntries(f.peer, req, &resp)
-	if err != nil {
-
+	if err := s.Transport().AppendEntries(f.peer, req, &resp); err != nil {
+		s.err("Failed to AppendEntries to %v: %v", f.peer, err)
+		return
 	}
-	// if err == nil {
-	// 	if resp.Success {
-	// 		// s.updateLastAppend(f, req)
-	// 		return
-	// 	}
-	// }
+
+	if resp.Success {
+		s.updateLastAppend(f, req)
+	} else {
+		f.nextIndex = max(min(f.nextIndex-1, resp.LastLogIndex+1), 1)
+		f.matchIndex = f.nextIndex - 1
+
+		s.replicateTo(f)
+
+		s.debug("AppendEntries to %v rejected, sending older logs (next :%d)", f.peer, f.nextIndex)
+	}
 	return
 }
 
@@ -112,4 +117,34 @@ func (s *Server) heartbeat(f *follower, stopCh chan struct{}) {
 			s.replicateTo(f)
 		}
 	}
+}
+
+func (s *Server) updateLastAppend(f *follower, req *AppendEntryRequest) {
+	f.Lock()
+	defer f.Unlock()
+	for _, log := range req.Entries {
+		s.commit(log.Index)
+		f.matchIndex = log.Index
+		f.nextIndex = log.Index + 1
+	}
+}
+
+func (s *Server) commit(index uint64) {
+	log, ok := s.applying[index]
+	if !ok {
+		return
+	}
+
+	log.count++
+
+	if log.count < log.majorityQuorum {
+		return
+	}
+
+	s.Lock()
+	delete(s.applying, index)
+	s.Unlock()
+
+	s.setCommitIndex(index)
+	//s.commitCh <- log
 }
