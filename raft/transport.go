@@ -10,4 +10,7 @@ type Transport interface {
 
 	// RequestVote used to send RPC to target node
 	RequestVote(target string, req *RequestVoteRequest, resp *RequestVoteResponse) error
+
+	// AppendEntries used to send RPC to target node
+	AppendEntries(target string, req *AppendEntryRequest, resp *AppendEntryResponse) error
 }

@@ -14,11 +14,13 @@ type Server struct {
 	transport Transport
 
 	rpcCh        <-chan RPC
+	logStore     LogStore
 	lastLogIndex uint64
 	lastLogTerm  uint64
 	commitIndex  uint64
 
-	peers []string
+	peers     []string
+	followers map[string]*follower
 
 	stopCh chan struct{}
 
@@ -26,21 +28,26 @@ type Server struct {
 	sync.Mutex
 }
 
-func NewServer(config *Config, transport Transport) *Server {
+func NewServer(config *Config, transport Transport, logStore LogStore) *Server {
 	s := &Server{
-		localAddr:    transport.LocalAddr(),
-		currentTerm:  0,
-		state:        Stopped,
-		votedFor:     "",
-		leader:       "",
-		config:       config,
-		transport:    transport,
-		rpcCh:        transport.Consumer(),
-		lastLogIndex: 0,
-		lastLogTerm:  0,
-		commitIndex:  0,
-		peers:        []string{},
+		localAddr:   transport.LocalAddr(),
+		currentTerm: 0,
+		state:       Stopped,
+		votedFor:    "",
+		leader:      "",
+		config:      config,
+		transport:   transport,
+		rpcCh:       transport.Consumer(),
+		logStore:    logStore,
+		peers:       []string{},
 	}
+
+	lastIndex, _ := s.logStore.LastIndex()
+	if lastIndex > 0 {
+		lastLog, _ := s.logStore.GetLog(lastIndex)
+		s.setLastLogInfo(lastLog.Index, lastLog.Term)
+	}
+
 	return s
 }
 
@@ -148,6 +155,13 @@ func (s *Server) LastLogInfo() (uint64, uint64) {
 	s.Lock()
 	defer s.Unlock()
 	return s.lastLogIndex, s.lastLogTerm
+}
+
+func (s *Server) setLastLogInfo(idx uint64, term uint64) {
+	s.Lock()
+	defer s.Unlock()
+	s.lastLogIndex = idx
+	s.lastLogTerm = term
 }
 
 func (s *Server) CommitIndex() uint64 {

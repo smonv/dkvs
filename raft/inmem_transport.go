@@ -33,6 +33,12 @@ func NewInmemTransport(addr string) *InmemTransport {
 
 }
 
+func (i *InmemTransport) AddPeer(peer *InmemTransport) {
+	i.Lock()
+	defer i.Unlock()
+	i.peers[peer.LocalAddr()] = peer
+}
+
 func (i *InmemTransport) Consumer() <-chan RPC {
 	return i.consumerCh
 }
@@ -53,7 +59,19 @@ func (i *InmemTransport) RequestVote(target string, req *RequestVoteRequest, res
 	return nil
 }
 
-func (i *InmemTransport) sentRPC(target string, req *RequestVoteRequest, timeout time.Duration) (rpcResp RPCResponse, err error) {
+func (i *InmemTransport) AppendEntries(target string, req *AppendEntryRequest, resp *AppendEntryResponse) error {
+	rpcResp, err := i.sentRPC(target, req, i.timeout)
+	if err != nil {
+		return err
+	}
+
+	// Copy back
+	out := rpcResp.Response.(*AppendEntryResponse)
+	*resp = *out
+	return nil
+}
+
+func (i *InmemTransport) sentRPC(target string, req interface{}, timeout time.Duration) (rpcResp RPCResponse, err error) {
 	i.RLock()
 	peer, ok := i.peers[target]
 	i.RUnlock()

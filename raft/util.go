@@ -41,10 +41,11 @@ func generateUUID() string {
 		panic(fmt.Errorf("failed to read random bytes: %v", err))
 	}
 
-	return fmt.Sprintf("%08x-%04x-%04x-%04x-%12x",
+	s := fmt.Sprintf("%08x-%04x-%04x-%04x-%12x",
 		buf[0:4],
 		buf[4:6],
 		buf[6:8],
 		buf[8:10],
 		buf[10:16])
+	return s[:8]
 }

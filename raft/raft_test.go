@@ -133,3 +133,29 @@ func TestServerSelfPromoteToLeader(t *testing.T) {
 		t.Fatalf("Server not promote to leader")
 	}
 }
+
+func TestClusterPromote(t *testing.T) {
+	cluster := NewTestCluster(5)
+	for _, server := range cluster {
+		server.Start()
+	}
+	defer func() {
+		for _, server := range cluster {
+			server.Stop()
+		}
+	}()
+
+	var leader *Server
+
+	time.Sleep(2 * testElectionTimeout)
+
+	for _, server := range cluster {
+		if server.State() == Leader {
+			leader = server
+		}
+	}
+
+	if leader == nil {
+		t.Fatalf("Cannot elect leader")
+	}
+}
