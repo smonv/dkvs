@@ -3,7 +3,8 @@ package raft
 func NewTestServer() *Server {
 	transport := NewInmemTransport("")
 	logstore := NewInmemLogStore()
-	s := NewServer(DefaultConfig(), transport, logstore)
+	sm := NewInMemStateMachine()
+	s := NewServer(DefaultConfig(), transport, logstore, sm)
 	transport.AddPeer(transport)
 	s.setTransport(transport)
 	return s
@@ -27,7 +28,8 @@ func NewTestCluster(total int) []*Server {
 
 	for _, transport := range transports {
 		logStore := NewInmemLogStore()
-		s := NewServer(DefaultConfig(), transport, logStore)
+		sm := NewInMemStateMachine()
+		s := NewServer(DefaultConfig(), transport, logStore, sm)
 		cluster = append(cluster, s)
 		for _, peer := range transports {
 			if s.LocalAddr() != peer.LocalAddr() {

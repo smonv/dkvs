@@ -295,7 +295,7 @@ func TestMultiNode(t *testing.T) {
 			leader = server
 		}
 	}
-	e := &Log{Data: []byte("Test Command")}
+	e := &Log{Data: []byte("a:b")}
 	leader.dispatchLog(e)
 
 	time.Sleep(2 * testElectionTimeout)
@@ -311,8 +311,8 @@ func TestMultiNode(t *testing.T) {
 		}
 	}
 
-	e2 := &Log{Data: []byte("Test 2")}
-	e3 := &Log{Data: []byte("Test 3")}
+	e2 := &Log{Data: []byte("a:c")}
+	e3 := &Log{Data: []byte("a:d")}
 
 	leader.dispatchLog(e2)
 	leader.dispatchLog(e3)

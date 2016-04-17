@@ -19,12 +19,15 @@ type Server struct {
 	lastLogTerm  uint64
 	commitIndex  uint64
 
+	stateMachine StateMachine
+
 	peers     []string
 	followers map[string]*follower
 
 	// leader working channel
 	applyCh  chan *Log
 	applying map[uint64]*Log
+	commitCh chan *Log
 
 	stopCh chan struct{}
 
@@ -32,18 +35,20 @@ type Server struct {
 	sync.Mutex
 }
 
-func NewServer(config *Config, transport Transport, logStore LogStore) *Server {
+// NewServer is used to create new raft node
+func NewServer(config *Config, transport Transport, ls LogStore, sm StateMachine) *Server {
 	s := &Server{
-		localAddr:   transport.LocalAddr(),
-		currentTerm: 0,
-		state:       Stopped,
-		votedFor:    "",
-		leader:      "",
-		config:      config,
-		transport:   transport,
-		rpcCh:       transport.Consumer(),
-		logStore:    logStore,
-		peers:       []string{},
+		localAddr:    transport.LocalAddr(),
+		currentTerm:  0,
+		state:        Stopped,
+		votedFor:     "",
+		leader:       "",
+		config:       config,
+		transport:    transport,
+		rpcCh:        transport.Consumer(),
+		logStore:     ls,
+		stateMachine: sm,
+		peers:        []string{},
 	}
 
 	lastIndex, _ := s.logStore.LastIndex()
@@ -178,6 +183,18 @@ func (s *Server) setCommitIndex(idx uint64) {
 	s.Lock()
 	defer s.Unlock()
 	s.commitIndex = idx
+}
+
+func (s *Server) StateMachine() StateMachine {
+	s.Lock()
+	defer s.Unlock()
+	return s.stateMachine
+}
+
+func (s *Server) setStateMachine(sm StateMachine) {
+	s.Lock()
+	defer s.Unlock()
+	s.stateMachine = sm
 }
 
 // MemberCount is used to get total member in cluster

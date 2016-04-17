@@ -107,6 +107,7 @@ func (s *Server) runAsLeader() {
 	s.followers = make(map[string]*follower)
 	s.applying = make(map[uint64]*Log)
 	s.applyCh = make(chan *Log)
+	s.commitCh = make(chan *Log)
 
 	// send heartbeat to notify leadership
 	for _, peer := range s.peers {
@@ -125,6 +126,8 @@ func (s *Server) runAsLeader() {
 			s.processRPC(rpc)
 		case newLog := <-s.applyCh:
 			s.dispatchLog(newLog)
+		case log := <-s.commitCh:
+			s.commitLog(log)
 		case <-s.stopCh:
 			return
 		}
@@ -165,6 +168,18 @@ func (s *Server) dispatchLog(applyLog *Log) {
 	s.setLastLogInfo(lastLogIndex+1, currentTerm)
 	for _, f := range s.followers {
 		asyncNotifyCh(f.replicateCh)
+	}
+}
+
+func (s *Server) commitLog(log *Log) {
+	data := string(log.Data)
+	result := s.StateMachine().Set(data)
+	switch result.(type) {
+	case error:
+		s.err(result.(error).Error())
+	case string:
+		s.debug(data)
+		s.setCommitIndex(log.Index)
 	}
 }
 
@@ -213,14 +228,14 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	} else {
 		prevLog, err := s.logStore.GetLog(req.PrevLogIndex)
 		if err != nil {
-			s.debug("failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
+			s.err("AE.Failed to get previous log: %v %s (last %v)", req.PrevLogIndex, err, lastLogIndex)
 			return
 		}
 		prevLogTerm = prevLog.Term
 	}
 
 	if req.PrevLogTerm != prevLogTerm {
-		s.debug("server.entry.append: Previouse log term mis-match: current: %v request: %v", prevLogTerm, req.PrevLogTerm)
+		s.err("AE.Previouse log term mis-match: current: %v request: %v", prevLogTerm, req.PrevLogTerm)
 		return
 	}
 
@@ -233,13 +248,13 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 		if first.Index <= lastLogIndex {
 			s.debug("server.log.clear: from %d to %d", first.Index, lastLogIndex)
 			if err := s.logStore.DeleteRange(first.Index, lastLogIndex); err != nil {
-				s.debug("server.logs.clear.failed: %v", err)
+				s.err("server.logs.clear.failed: %v", err)
 				return
 			}
 		}
 
 		if err := s.logStore.SetLogs(req.Entries); err != nil {
-			s.debug("server.logs.append.failed: %v", err)
+			s.err("server.logs.append.failed: %v", err)
 			return
 		}
 

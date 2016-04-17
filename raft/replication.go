@@ -145,6 +145,6 @@ func (s *Server) commit(index uint64) {
 	delete(s.applying, index)
 	s.Unlock()
 
-	s.setCommitIndex(index)
-	//s.commitCh <- log
+	// s.setCommitIndex(log.Index)
+	s.commitCh <- log
 }
