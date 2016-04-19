@@ -17,14 +17,15 @@ func NewInMemStateMachine() *InmemStateMachine {
 	}
 }
 
-func (sm *InmemStateMachine) Set(data interface{}) interface{} {
+func (sm *InmemStateMachine) Set(data interface{}) error {
 	sm.Lock()
 	defer sm.Unlock()
+	command := string(data.([]byte))
 
-	result := strings.Split(data.(string), ":")
+	result := strings.Split(command, ":")
 	if len(result) > 1 {
 		sm.data[result[0]] = result[1]
-		return sm.data[result[0]]
+		return nil
 	}
 	return fmt.Errorf("cannot set")
 }
@@ -32,8 +33,9 @@ func (sm *InmemStateMachine) Set(data interface{}) interface{} {
 func (sm *InmemStateMachine) Get(data interface{}) interface{} {
 	sm.Lock()
 	defer sm.Unlock()
+	command := string(data.([]byte))
 
-	result := strings.Split(data.(string), ":")
+	result := strings.Split(command, ":")
 	if len(result) == 1 {
 		return sm.data[result[0]]
 	}

@@ -157,30 +157,41 @@ func (s *Server) dispatchLog(applyLog *Log) {
 	applyLog.Index = lastLogIndex + 1
 	applyLog.majorityQuorum = s.QuorumSize()
 	applyLog.count = 0
+	s.debug("applyLog: %+v", applyLog)
 
 	if err := s.logStore.SetLog(applyLog); err != nil {
 		s.err("%v", err)
 		return
 	}
-
-	s.applying[applyLog.Index] = applyLog
-
 	s.setLastLogInfo(lastLogIndex+1, currentTerm)
-	for _, f := range s.followers {
-		asyncNotifyCh(f.replicateCh)
+
+	applyLog.count++
+	s.debug("applyLog: %+v", applyLog)
+
+	if len(s.followers) > 0 {
+		s.applying[applyLog.Index] = applyLog
+
+		for _, f := range s.followers {
+			asyncNotifyCh(f.replicateCh)
+		}
+	} else {
+		s.commitCh <- applyLog
 	}
 }
 
 func (s *Server) commitLog(log *Log) {
-	data := string(log.Data)
-	result := s.StateMachine().Set(data)
-	switch result.(type) {
-	case error:
-		s.err(result.(error).Error())
-	case string:
-		s.debug(data)
-		s.setCommitIndex(log.Index)
+	err := s.StateMachine().Set(log.Command)
+
+	if err != nil {
+		s.err(err.Error())
+		log.errCh <- err
+		return
 	}
+
+	s.debug("Commited Log Idx: %v", log.Index)
+	s.setCommitIndex(log.Index)
+	log.errCh <- nil
+	return
 }
 
 func (s *Server) processRPC(rpc RPC) {
@@ -267,7 +278,7 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	if req.LeaderCommitIndex > s.CommitIndex() {
 		idx := min(req.LeaderCommitIndex, s.LastLogIndex())
 		s.setCommitIndex(idx)
-		s.debug("server.commit.index: %v", s.CommitIndex())
+		s.debug("Server: %v, Commited Index: %v", s.LocalAddr(), s.CommitIndex())
 		// TODO: process log
 	}
 
@@ -364,4 +375,21 @@ func (s *Server) requestVote(peer string, req *RequestVoteRequest, respCh chan *
 	}
 
 	respCh <- resp
+}
+
+func (s *Server) Do(command []byte) error {
+	entry := &Log{
+		Command: command,
+		errCh:   make(chan error),
+	}
+
+	s.dispatchLog(entry)
+
+	select {
+	case err := <-entry.errCh:
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

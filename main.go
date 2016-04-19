@@ -3,8 +3,10 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 
+	"github.com/gorilla/mux"
 	"github.com/tthanh/dkvs/raft"
 )
 
@@ -18,19 +20,20 @@ func main() {
 	flag.Parse()
 
 	var server *raft.Server
+	var r = mux.NewRouter()
 
 	if new {
 		config := raft.DefaultConfig()
 		transport := NewHTTPTransport(addr)
 		ls := raft.NewInmemLogStore()
-		sm := raft.NewInMemStateMachine()
+		sm := NewStateMachine()
 		server = raft.NewServer(config, transport, ls, sm)
 		server.Start()
 		defer server.Stop()
 
-		http.HandleFunc("/request_vote", requestVoteHandle)
-		http.HandleFunc("/append_entries", appendEntriesHandle)
-		http.ListenAndServe(addr, nil)
+		r.HandleFunc("/{key}", transport.getHandle(server)).Methods("GET")
+		r.HandleFunc("/{key}", transport.setHandle(server)).Methods("POST")
+		http.ListenAndServe(addr, r)
 	}
 }
 
@@ -40,6 +43,11 @@ func requestVoteHandle(w http.ResponseWriter, r *http.Request) {
 }
 
 func appendEntriesHandle(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Listening on /append_entries")
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(string(body))
 	w.Write([]byte("Listening on /append_entries"))
 }

@@ -12,8 +12,11 @@ const (
 type Log struct {
 	Index   uint64
 	Term    uint64
-	LogType LogType
-	Data    []byte
+	Type    LogType
+	Command []byte
+
+	err   error
+	errCh chan error
 
 	// not exported, only for checking majority members
 	// already applied

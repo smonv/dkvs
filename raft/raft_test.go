@@ -295,10 +295,19 @@ func TestMultiNode(t *testing.T) {
 			leader = server
 		}
 	}
-	e := &Log{Data: []byte("a:b")}
+	e := &Log{
+		Command: []byte("a:b"),
+		errCh:   make(chan error),
+	}
 	leader.dispatchLog(e)
 
-	time.Sleep(2 * testElectionTimeout)
+	select {
+	case err := <-e.errCh:
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+
 	if leader.CommitIndex() != 1 {
 		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
 	}
@@ -311,16 +320,36 @@ func TestMultiNode(t *testing.T) {
 		}
 	}
 
-	e2 := &Log{Data: []byte("a:c")}
-	e3 := &Log{Data: []byte("a:d")}
+	e2 := &Log{
+		Command: []byte("a:c"),
+		errCh:   make(chan error),
+	}
+	e3 := &Log{
+		Command: []byte("a:d"),
+		errCh:   make(chan error),
+	}
 
 	leader.dispatchLog(e2)
 	leader.dispatchLog(e3)
 
-	time.Sleep(2 * testElectionTimeout)
+	select {
+	case err := <-e2.errCh:
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+
+	select {
+	case err := <-e3.errCh:
+		if err != nil {
+			t.Fatalf(err.Error())
+		}
+	}
+
 	if leader.CommitIndex() != 3 {
 		t.Fatalf("Failed to commit log. Current: %v", leader.CommitIndex())
 	}
+
 	time.Sleep(testElectionTimeout)
 	for _, s := range cluster {
 		if s.CommitIndex() != 3 {
