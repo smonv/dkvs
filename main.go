@@ -2,8 +2,6 @@ package main
 
 import (
 	"flag"
-	"fmt"
-	"io/ioutil"
 	"net/http"
 
 	"github.com/gorilla/mux"
@@ -35,19 +33,4 @@ func main() {
 		r.HandleFunc("/{key}", transport.setHandle(server)).Methods("POST")
 		http.ListenAndServe(addr, r)
 	}
-}
-
-func requestVoteHandle(w http.ResponseWriter, r *http.Request) {
-	fmt.Println("Listening on /request_vote")
-	w.Write([]byte("Listening on /request_vote"))
-}
-
-func appendEntriesHandle(w http.ResponseWriter, r *http.Request) {
-	body, err := ioutil.ReadAll(r.Body)
-	if err != nil {
-		panic(err)
-	}
-
-	fmt.Println(string(body))
-	w.Write([]byte("Listening on /append_entries"))
 }

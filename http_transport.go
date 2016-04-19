@@ -73,7 +73,5 @@ func (t *HTTPTransport) setHandle(server *raft.Server) http.HandlerFunc {
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 		}
-
-		w.Write([]byte("RECV POST /" + vars["key"]))
 	}
 }
