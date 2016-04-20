@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
+	"net"
 	"net/http"
 	"time"
 
@@ -32,6 +33,22 @@ func NewHTTPTransport(addr string, consumer <-chan raft.RPC) *HTTPTransport {
 	}
 }
 
+func NewHTTPClient() *http.Client {
+	return &http.Client{
+		Transport: &http.Transport{
+			Dial: func(netw, addr string) (net.Conn, error) {
+				deadline := time.Now().Add(5 * time.Second)
+				c, err := net.DialTimeout(netw, addr, 5*time.Second)
+				if err != nil {
+					return nil, err
+				}
+				c.SetDeadline(deadline)
+				return c, nil
+			},
+		},
+	}
+}
+
 func (t *HTTPTransport) Consumer() <-chan raft.RPC {
 	return t.consumer
 }
@@ -47,7 +64,7 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	data, err := json.Marshal(req)
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	request.Header.Set("X-Custom-Header", "myvalue")
+	// request.Header.Set("X-Custom-Header", "myvalue")
 	request.Header.Set("Content-Type", "application/json")
 
 	if err != nil {
@@ -55,11 +72,13 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	}
 
 	response, err := t.client.Do(request)
+
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
+
 	body, _ := ioutil.ReadAll(response.Body)
+	response.Body.Close()
 
 	json.Unmarshal(body, &resp)
 
@@ -107,7 +126,7 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 	data, err := json.Marshal(req)
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	request.Header.Set("X-Custom-Header", "myvalue")
+	// request.Header.Set("X-Custom-Header", "myvalue")
 	request.Header.Set("Content-Type", "application/json")
 
 	if err != nil {
@@ -118,8 +137,8 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 	if err != nil {
 		return err
 	}
-	defer response.Body.Close()
 	body, _ := ioutil.ReadAll(response.Body)
+	response.Body.Close()
 
 	json.Unmarshal(body, &resp)
 	return nil

@@ -278,7 +278,7 @@ func TestServerAppendEntriesStaleTermRejected(t *testing.T) {
 }
 
 func TestMultiNode(t *testing.T) {
-	cluster := NewTestCluster(3)
+	cluster := NewTestCluster(2)
 	for _, server := range cluster {
 		server.Start()
 	}

@@ -95,9 +95,8 @@ func (s *Server) replicateTo(f *follower) {
 		f.nextIndex = max(min(f.nextIndex-1, resp.LastLogIndex+1), 1)
 		f.matchIndex = f.nextIndex - 1
 
-		s.replicateTo(f)
-
 		s.debug("AppendEntries to %v rejected, sending older logs (next :%d)", f.peer, f.nextIndex)
+		s.replicateTo(f)
 	}
 	return
 }
@@ -108,12 +107,11 @@ func (s *Server) heartbeat(f *follower, stopCh chan struct{}) {
 	for {
 		select {
 		case <-stopCh:
-			s.debug("Heartbeat Stop: %s -> %s", s.LocalAddr(), f.peer)
+			// s.debug("Heartbeat Stop: %s -> %s", s.LocalAddr(), f.peer)
 			ticker.Stop()
 			return
 		case <-ticker.C:
-			s.debug("Heartbeat Start: %s -> %s", s.LocalAddr(), f.peer)
-
+			// s.debug("Heartbeat Start: %s -> %s", s.LocalAddr(), f.peer)
 			s.replicateTo(f)
 		}
 	}

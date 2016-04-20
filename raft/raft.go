@@ -161,8 +161,10 @@ func (s *Server) dispatchLog(applyLog *Log) {
 
 	if err := s.logStore.SetLog(applyLog); err != nil {
 		s.err("%v", err)
+		applyLog.errCh <- err
 		return
 	}
+
 	s.setLastLogInfo(lastLogIndex+1, currentTerm)
 
 	applyLog.count++
@@ -180,18 +182,16 @@ func (s *Server) dispatchLog(applyLog *Log) {
 }
 
 func (s *Server) commitLog(log *Log) {
+	s.debug("commit log: %+v", log)
 	err := s.StateMachine().Set(log.Command)
 
-	if err != nil {
+	if err == nil {
+		s.setCommitIndex(log.Index)
+		s.debug("Commited Log Idx: %v", s.CommitIndex())
+	} else {
 		s.err(err.Error())
-		log.errCh <- err
-		return
 	}
-
-	s.debug("Commited Log Idx: %v", log.Index)
-	s.setCommitIndex(log.Index)
-	log.errCh <- nil
-	return
+	log.errCh <- err
 }
 
 func (s *Server) processRPC(rpc RPC) {
@@ -208,7 +208,10 @@ func (s *Server) processRPC(rpc RPC) {
 }
 
 func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
-	s.debug("AE.Request: %+v", req)
+	if len(req.Entries) > 0 {
+		s.debug("AE.Request: %+v", req)
+	}
+
 	resp := &AppendEntryResponse{
 		Term:         s.CurrentTerm(),
 		LastLogIndex: s.LastLogIndex(),
@@ -217,7 +220,10 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 
 	var err error
 	defer func() {
-		s.debug("AE.Response: %+v", resp)
+		if len(req.Entries) > 0 {
+			s.debug("AE.Response: %+v", resp)
+		}
+
 		rpc.Response(resp, err)
 	}()
 
@@ -277,9 +283,26 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	// Update commit index
 	if req.LeaderCommitIndex > s.CommitIndex() {
 		idx := min(req.LeaderCommitIndex, s.LastLogIndex())
-		s.setCommitIndex(idx)
 		s.debug("Server: %v, Commited Index: %v", s.LocalAddr(), s.CommitIndex())
-		// TODO: process log
+
+		log, err := s.logStore.GetLog(idx)
+		if err != nil {
+			s.err(err.Error())
+			return
+		}
+
+		log.errCh = make(chan error, 1)
+		s.commitLog(log)
+
+		select {
+		case commitErr := <-log.errCh:
+			if commitErr != nil {
+				err = commitErr
+				return
+			}
+			s.debug("commited log with no errors")
+			close(log.errCh)
+		}
 	}
 
 	resp.Success = true
