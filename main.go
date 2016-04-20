@@ -42,6 +42,7 @@ func main() {
 		defer server.Stop()
 
 		r.HandleFunc("/request_vote", transport.requestVoteHandle(consumer)).Methods("POST")
+		r.HandleFunc("/append_entries", transport.appendEntriesHandle(consumer)).Methods("POST")
 		r.HandleFunc("/store/{key}", transport.getHandle(server)).Methods("GET")
 		r.HandleFunc("/store/{key}", transport.setHandle(server)).Methods("POST")
 		http.ListenAndServe(addr, r)

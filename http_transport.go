@@ -102,7 +102,61 @@ func (t *HTTPTransport) requestVoteHandle(consumer chan raft.RPC) http.HandlerFu
 
 // AppendEntries is used to send append entries
 func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryRequest, resp *raft.AppendEntryResponse) error {
+	url := "http://" + target + "/append_entries"
+
+	data, err := json.Marshal(req)
+
+	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
+	request.Header.Set("X-Custom-Header", "myvalue")
+	request.Header.Set("Content-Type", "application/json")
+
+	if err != nil {
+		return err
+	}
+
+	response, err := t.client.Do(request)
+	if err != nil {
+		return err
+	}
+	defer response.Body.Close()
+	body, _ := ioutil.ReadAll(response.Body)
+
+	json.Unmarshal(body, &resp)
 	return nil
+}
+
+func (t *HTTPTransport) appendEntriesHandle(consumer chan raft.RPC) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+
+		var req raft.AppendEntryRequest
+
+		body, _ := ioutil.ReadAll(r.Body)
+
+		d := json.NewDecoder(bytes.NewBuffer(body))
+		d.UseNumber()
+
+		if err := d.Decode(&req); err != nil {
+			panic(err)
+		}
+
+		respCh := make(chan raft.RPCResponse)
+
+		rpc := raft.RPC{
+			Request: &req,
+			RespCh:  respCh,
+		}
+
+		consumer <- rpc
+
+		select {
+		case resp := <-respCh:
+			data, err := json.Marshal(resp.Response.(*raft.AppendEntryResponse))
+			if err != nil {
+				w.WriteHeader(http.StatusBadRequest)
+			}
+			w.Write(data)
+		}
+	}
 }
 
 func (t *HTTPTransport) getHandle(server *raft.Server) http.HandlerFunc {
