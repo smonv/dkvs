@@ -8,6 +8,8 @@ import (
 	"github.com/tthanh/dkvs/raft"
 )
 
+var consumer chan raft.RPC
+
 func main() {
 	var new bool
 	var addr string
@@ -21,16 +23,18 @@ func main() {
 	var r = mux.NewRouter()
 
 	if new {
+		consumer = make(chan raft.RPC)
 		config := raft.DefaultConfig()
-		transport := NewHTTPTransport(addr)
+		transport := NewHTTPTransport(addr, consumer)
 		ls := raft.NewInmemLogStore()
 		sm := NewStateMachine()
 		server = raft.NewServer(config, transport, ls, sm)
 		server.Start()
 		defer server.Stop()
 
-		r.HandleFunc("/{key}", transport.getHandle(server)).Methods("GET")
-		r.HandleFunc("/{key}", transport.setHandle(server)).Methods("POST")
+		r.HandleFunc("/request_vote", transport.requestVoteHandle(consumer)).Methods("POST")
+		r.HandleFunc("/store/{key}", transport.getHandle(server)).Methods("GET")
+		r.HandleFunc("/store/{key}", transport.setHandle(server)).Methods("POST")
 		http.ListenAndServe(addr, r)
 	}
 }

@@ -10,10 +10,10 @@ const (
 
 // Log entries are replicate to all member
 type Log struct {
-	Index   uint64
-	Term    uint64
-	Type    LogType
-	Command []byte
+	Index   uint64  `json:"index"`
+	Term    uint64  `json:"term"`
+	Type    LogType `json:"type"`
+	Command []byte  `json:"command"`
 
 	err   error
 	errCh chan error

@@ -19,16 +19,16 @@ func (rpc *RPC) Response(resp interface{}, err error) {
 
 // RequestVoteRequest is used to make request vote message
 type RequestVoteRequest struct {
-	Term         uint64
-	Candidate    string
-	LastLogIndex uint64
-	LastLogTerm  uint64
+	Term         uint64 `json:"term,string"`
+	Candidate    string `json:"candidate"`
+	LastLogIndex uint64 `json:"lastLogIndex,string"`
+	LastLogTerm  uint64 `json:"lastLogTerm,string"`
 }
 
 // RequestVoteResponse is used to make response message of request vote
 type RequestVoteResponse struct {
-	Term    uint64
-	Granted bool
+	Term    uint64 `json:"term,string"`
+	Granted bool   `json:"granted"`
 }
 
 func newVoteRequest(term uint64, candidate string, lastLogIdx uint64, lastLogTerm uint64) *RequestVoteRequest {
