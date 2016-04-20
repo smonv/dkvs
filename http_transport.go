@@ -3,9 +3,9 @@ package main
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io/ioutil"
 	"net/http"
+	"time"
 
 	"github.com/gorilla/mux"
 	"github.com/tthanh/dkvs/raft"
@@ -26,7 +26,9 @@ func NewHTTPTransport(addr string, consumer <-chan raft.RPC) *HTTPTransport {
 	return &HTTPTransport{
 		consumer:  consumer,
 		localAddr: addr,
-		client:    &http.Client{},
+		client: &http.Client{
+			Timeout: 15 * time.Second,
+		},
 	}
 }
 
@@ -40,8 +42,10 @@ func (t *HTTPTransport) LocalAddr() string {
 
 // RequestVote is used to send vote request
 func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest, resp *raft.RequestVoteResponse) error {
-	url := target + "/request_vote"
+	url := "http://" + target + "/request_vote"
+
 	data, err := json.Marshal(req)
+
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 	request.Header.Set("X-Custom-Header", "myvalue")
 	request.Header.Set("Content-Type", "application/json")
@@ -56,7 +60,9 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	}
 	defer response.Body.Close()
 	body, _ := ioutil.ReadAll(response.Body)
+
 	json.Unmarshal(body, &resp)
+
 	return nil
 }
 
@@ -66,16 +72,13 @@ func (t *HTTPTransport) requestVoteHandle(consumer chan raft.RPC) http.HandlerFu
 		var req raft.RequestVoteRequest
 
 		body, _ := ioutil.ReadAll(r.Body)
-		fmt.Println(string(body))
+
 		d := json.NewDecoder(bytes.NewBuffer(body))
 		d.UseNumber()
+
 		if err := d.Decode(&req); err != nil {
 			panic(err)
 		}
-
-		// json.Unmarshal(body, &req)
-
-		fmt.Printf("%+v \n", req)
 
 		respCh := make(chan raft.RPCResponse)
 
@@ -88,7 +91,7 @@ func (t *HTTPTransport) requestVoteHandle(consumer chan raft.RPC) http.HandlerFu
 
 		select {
 		case resp := <-respCh:
-			data, err := json.Marshal(resp)
+			data, err := json.Marshal(resp.Response.(*raft.RequestVoteResponse))
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 			}

@@ -207,6 +207,13 @@ func (s *Server) QuorumSize() int {
 	return (s.MemberCount() / 2) + 1
 }
 
+// AddPeer is used to add peer
+func (s *Server) AddPeer(peer string) {
+	s.Lock()
+	defer s.Unlock()
+	s.peers = append(s.peers, peer)
+}
+
 func (s *Server) debug(format string, v ...interface{}) {
 	s.config.Logger.Printf("[DEBUG] "+format, v...)
 }
