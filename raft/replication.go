@@ -85,7 +85,7 @@ func (s *Server) replicateTo(f *follower) {
 
 	var resp AppendEntryResponse
 	if err := s.Transport().AppendEntries(f.peer, req, &resp); err != nil {
-		s.err("Failed to AppendEntries to %v: %v", f.peer, err)
+		// s.err("Failed to AppendEntries to %v: %v", f.peer, err)
 		return
 	}
 

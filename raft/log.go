@@ -1,5 +1,7 @@
 package raft
 
+import "errors"
+
 // LogType describe type of log
 type LogType uint8
 
@@ -24,6 +26,10 @@ type Log struct {
 	count          int
 
 	peer string
+}
+
+func (l *Log) responseLeaderAddress(leader string) {
+	l.errCh <- errors.New(leader)
 }
 
 // LogStore provide interface for working with log

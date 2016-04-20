@@ -52,6 +52,9 @@ func (s *Server) runAsFollower() {
 		case rpc := <-s.rpcCh:
 			electionTimeout.Reset(randomDuration(s.config.ElectionTimeout))
 			s.processRPC(rpc)
+		case log := <-s.applyCh:
+			s.debug("return leader address")
+			log.responseLeaderAddress(s.Leader())
 		case <-electionTimeout.C:
 			s.setLeader("")
 			s.setState(Candidate)
@@ -73,6 +76,8 @@ func (s *Server) runAsCandidate() {
 		select {
 		case rpc := <-s.rpcCh:
 			s.processRPC(rpc)
+		case log := <-s.applyCh:
+			log.responseLeaderAddress(s.Leader())
 		case vote := <-voteCh:
 			// Check if response Term is greater than ours, step down
 			if vote.Term > s.CurrentTerm() {
@@ -106,7 +111,6 @@ func (s *Server) runAsLeader() {
 	s.debug("Server %s enter %s state", s.LocalAddr(), s.State().String())
 	s.followers = make(map[string]*follower)
 	s.applying = make(map[uint64]*Log)
-	s.applyCh = make(chan *Log)
 	s.commitCh = make(chan *Log)
 
 	// send heartbeat to notify leadership
@@ -182,7 +186,6 @@ func (s *Server) dispatchLog(applyLog *Log) {
 }
 
 func (s *Server) commitLog(log *Log) {
-	s.debug("commit log: %+v", log)
 	err := s.StateMachine().Set(log.Command)
 
 	if err == nil {
@@ -300,7 +303,6 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 				err = commitErr
 				return
 			}
-			s.debug("commited log with no errors")
 			close(log.errCh)
 		}
 	}
@@ -401,12 +403,13 @@ func (s *Server) requestVote(peer string, req *RequestVoteRequest, respCh chan *
 }
 
 func (s *Server) Do(command []byte) error {
+	s.debug("Server %s doing command", s.LocalAddr())
 	entry := &Log{
 		Command: command,
-		errCh:   make(chan error),
+		errCh:   make(chan error, 1),
 	}
 
-	s.dispatchLog(entry)
+	s.applyCh <- entry
 
 	select {
 	case err := <-entry.errCh:

@@ -23,9 +23,9 @@ type Server struct {
 
 	peers     []string
 	followers map[string]*follower
-
+	// apply log channel
+	applyCh chan *Log
 	// leader working channel
-	applyCh  chan *Log
 	applying map[uint64]*Log
 	commitCh chan *Log
 
@@ -46,6 +46,7 @@ func NewServer(config *Config, transport Transport, ls LogStore, sm StateMachine
 		config:       config,
 		transport:    transport,
 		rpcCh:        transport.Consumer(),
+		applyCh:      make(chan *Log),
 		logStore:     ls,
 		stateMachine: sm,
 		peers:        []string{},

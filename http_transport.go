@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io/ioutil"
-	"net"
 	"net/http"
 	"time"
 
@@ -33,22 +32,6 @@ func NewHTTPTransport(addr string, consumer <-chan raft.RPC) *HTTPTransport {
 	}
 }
 
-func NewHTTPClient() *http.Client {
-	return &http.Client{
-		Transport: &http.Transport{
-			Dial: func(netw, addr string) (net.Conn, error) {
-				deadline := time.Now().Add(5 * time.Second)
-				c, err := net.DialTimeout(netw, addr, 5*time.Second)
-				if err != nil {
-					return nil, err
-				}
-				c.SetDeadline(deadline)
-				return c, nil
-			},
-		},
-	}
-}
-
 func (t *HTTPTransport) Consumer() <-chan raft.RPC {
 	return t.consumer
 }
@@ -64,7 +47,6 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	data, err := json.Marshal(req)
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	// request.Header.Set("X-Custom-Header", "myvalue")
 	request.Header.Set("Content-Type", "application/json")
 
 	if err != nil {
@@ -126,7 +108,6 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 	data, err := json.Marshal(req)
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
-	// request.Header.Set("X-Custom-Header", "myvalue")
 	request.Header.Set("Content-Type", "application/json")
 
 	if err != nil {
@@ -181,7 +162,14 @@ func (t *HTTPTransport) appendEntriesHandle(consumer chan raft.RPC) http.Handler
 func (t *HTTPTransport) getHandle(server *raft.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
-		value := server.StateMachine().Get(vars["key"])
+
+		var value interface{}
+
+		if server.State() == raft.Leader {
+			value = server.StateMachine().Get(vars["key"])
+		} else {
+			value = server.Leader()
+		}
 		w.Write([]byte(value.(string)))
 	}
 }
@@ -210,7 +198,7 @@ func (t *HTTPTransport) setHandle(server *raft.Server) http.HandlerFunc {
 
 		err = server.Do(command)
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+			w.Write([]byte(err.Error()))
 		}
 	}
 }
