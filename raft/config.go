@@ -15,7 +15,7 @@ type Config struct {
 // DefaultConfig return default config for Raft node
 func DefaultConfig() *Config {
 	return &Config{
-		HeartbeatInterval: 50,
+		HeartbeatInterval: 75,
 		ElectionTimeout:   150,
 		Logger:            log.New(os.Stdout, "", log.LstdFlags),
 	}

@@ -41,7 +41,7 @@ func (i *InmemLogStore) GetLog(idx uint64) (*Log, error) {
 			return entry, nil
 		}
 	}
-	return nil, fmt.Errorf("Can't get log witn index %d", idx)
+	return nil, fmt.Errorf("Can't get log with index %d", idx)
 }
 
 func (i *InmemLogStore) SetLog(entry *Log) error {
