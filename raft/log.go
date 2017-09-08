@@ -17,15 +17,12 @@ type Log struct {
 	Type    LogType `json:"type"`
 	Command []byte  `json:"command"`
 
-	err   error
 	errCh chan error
 
 	// not exported, only for checking majority members
 	// already applied
 	majorityQuorum int
 	count          int
-
-	peer string
 }
 
 func (l *Log) responseLeaderAddress(leader string) {

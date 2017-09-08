@@ -68,12 +68,6 @@ func (s *Server) LocalAddr() string {
 	return s.localAddr
 }
 
-func (s *Server) setLocalAddr(address string) {
-	s.Lock()
-	defer s.Unlock()
-	s.localAddr = address
-}
-
 // CurrentTerm return current term of server
 func (s *Server) CurrentTerm() uint64 {
 	s.Lock()
@@ -101,18 +95,14 @@ func (s *Server) setState(state State) {
 	s.state = state
 }
 
+// VotedFor ...
 func (s *Server) VotedFor() string {
 	s.Lock()
 	defer s.Unlock()
 	return s.votedFor
 }
 
-func (s *Server) setVotedFor(candidate string) {
-	s.Lock()
-	defer s.Unlock()
-	s.votedFor = candidate
-}
-
+// Leader ...
 func (s *Server) Leader() string {
 	s.Lock()
 	defer s.Unlock()
@@ -125,6 +115,7 @@ func (s *Server) setLeader(leader string) {
 	s.leader = leader
 }
 
+// Transport ...
 func (s *Server) Transport() Transport {
 	s.Lock()
 	defer s.Unlock()
@@ -137,30 +128,14 @@ func (s *Server) setTransport(transport Transport) {
 	s.transport = transport
 }
 
+// LastLogIndex ...
 func (s *Server) LastLogIndex() uint64 {
 	s.Lock()
 	defer s.Unlock()
 	return s.lastLogIndex
 }
 
-func (s *Server) setLastLogIndex(idx uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.lastLogIndex = idx
-}
-
-func (s *Server) LastLogTerm() uint64 {
-	s.Lock()
-	defer s.Unlock()
-	return s.lastLogTerm
-}
-
-func (s *Server) setLastLogTerm(term uint64) {
-	s.Lock()
-	defer s.Unlock()
-	s.lastLogTerm = term
-}
-
+// LastLogInfo ...
 func (s *Server) LastLogInfo() (uint64, uint64) {
 	s.Lock()
 	defer s.Unlock()
@@ -174,6 +149,7 @@ func (s *Server) setLastLogInfo(idx uint64, term uint64) {
 	s.lastLogTerm = term
 }
 
+// CommitIndex ...
 func (s *Server) CommitIndex() uint64 {
 	s.Lock()
 	defer s.Unlock()
@@ -186,16 +162,11 @@ func (s *Server) setCommitIndex(idx uint64) {
 	s.commitIndex = idx
 }
 
+// StateMachine ...
 func (s *Server) StateMachine() StateMachine {
 	s.Lock()
 	defer s.Unlock()
 	return s.stateMachine
-}
-
-func (s *Server) setStateMachine(sm StateMachine) {
-	s.Lock()
-	defer s.Unlock()
-	s.stateMachine = sm
 }
 
 // MemberCount is used to get total member in cluster

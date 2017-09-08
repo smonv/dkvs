@@ -21,7 +21,6 @@ func (s *Server) Stop() {
 	s.wg.Wait()
 	s.setState(Stopped)
 	s.debug("Server %s %s", s.LocalAddr(), s.State().String())
-	return
 }
 
 func (s *Server) run() {
@@ -297,8 +296,7 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 		log.errCh = make(chan error, 1)
 		s.commitLog(log)
 
-		select {
-		case commitErr := <-log.errCh:
+		for commitErr := range log.errCh {
 			if commitErr != nil {
 				err = commitErr
 				return
@@ -308,7 +306,6 @@ func (s *Server) handleAppendEntries(rpc RPC, req *AppendEntryRequest) {
 	}
 
 	resp.Success = true
-	return
 }
 
 func (s *Server) handleRequestVote(rpc RPC, req *RequestVoteRequest) {
@@ -351,7 +348,6 @@ func (s *Server) handleRequestVote(rpc RPC, req *RequestVoteRequest) {
 	resp.Granted = true
 	resp.Term = s.CurrentTerm()
 	s.debug("Response: %+v", resp)
-	return
 }
 
 type voteResult struct {
@@ -402,6 +398,7 @@ func (s *Server) requestVote(peer string, req *RequestVoteRequest, respCh chan *
 	respCh <- resp
 }
 
+// Do ...
 func (s *Server) Do(command []byte) error {
 	s.debug("Server %s doing command", s.LocalAddr())
 	entry := &Log{
@@ -411,11 +408,11 @@ func (s *Server) Do(command []byte) error {
 
 	s.applyCh <- entry
 
-	select {
-	case err := <-entry.errCh:
+	for err := range entry.errCh {
 		if err != nil {
 			return err
 		}
 	}
+
 	return nil
 }

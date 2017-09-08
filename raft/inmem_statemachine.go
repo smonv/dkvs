@@ -6,17 +6,20 @@ import (
 	"sync"
 )
 
+// InmemStateMachine ...
 type InmemStateMachine struct {
 	sync.Mutex
 	data map[string]string
 }
 
+// NewInMemStateMachine ...
 func NewInMemStateMachine() *InmemStateMachine {
 	return &InmemStateMachine{
 		data: make(map[string]string),
 	}
 }
 
+// Set ...
 func (sm *InmemStateMachine) Set(data interface{}) error {
 	sm.Lock()
 	defer sm.Unlock()
@@ -30,6 +33,7 @@ func (sm *InmemStateMachine) Set(data interface{}) error {
 	return fmt.Errorf("cannot set")
 }
 
+// Get ...
 func (sm *InmemStateMachine) Get(data interface{}) interface{} {
 	sm.Lock()
 	defer sm.Unlock()

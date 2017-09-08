@@ -128,13 +128,20 @@ func TestServerRequestVoteDenyIfCandidateLogIsBehind(t *testing.T) {
 	e2 := &Log{Index: 2, Term: 1}
 	e3 := &Log{Index: 3, Term: 2}
 	s := NewTestServer()
-	s.logStore.SetLogs([]*Log{e1, e2, e3})
+
+	err := s.logStore.SetLogs([]*Log{e1, e2, e3})
+	if err != nil {
+		t.Fatal(err)
+	}
+
 	lastLogIdx, _ := s.logStore.LastIndex()
 	lastLog, _ := s.logStore.GetLog(lastLogIdx)
+
 	s.setLastLogInfo(lastLog.Index, lastLog.Term)
 
 	s.Start()
 	defer s.Stop()
+
 	if lastIdx, lastTerm := s.LastLogInfo(); lastIdx != 3 || lastTerm != 2 {
 		t.Fatalf("Wrong last log. Idx: %v. Term %v", lastIdx, lastTerm)
 	}
@@ -301,10 +308,9 @@ func TestMultiNode(t *testing.T) {
 	}
 	leader.dispatchLog(e)
 
-	select {
-	case err := <-e.errCh:
+	for err := range e.errCh {
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 	}
 
@@ -332,17 +338,15 @@ func TestMultiNode(t *testing.T) {
 	leader.dispatchLog(e2)
 	leader.dispatchLog(e3)
 
-	select {
-	case err := <-e2.errCh:
+	for err := range e2.errCh {
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 	}
 
-	select {
-	case err := <-e3.errCh:
+	for err := range e3.errCh {
 		if err != nil {
-			t.Fatalf(err.Error())
+			t.Fatal(err)
 		}
 	}
 

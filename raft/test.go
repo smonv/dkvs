@@ -1,5 +1,6 @@
 package raft
 
+// NewTestServer ...
 func NewTestServer() *Server {
 	transport := NewInmemTransport("")
 	logstore := NewInmemLogStore()
@@ -10,6 +11,7 @@ func NewTestServer() *Server {
 	return s
 }
 
+// NewTestCluster ...
 func NewTestCluster(total int) []*Server {
 	transports := []*InmemTransport{}
 	cluster := []*Server{}

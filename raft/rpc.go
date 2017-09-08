@@ -59,7 +59,7 @@ type AppendEntryResponse struct {
 }
 
 func newAppendEntriesRequest(
-	term, prevLogIndex , prevLogTerm uint64,
+	term, prevLogIndex, prevLogTerm uint64,
 	entries []*Log,
 	leader string,
 	leaderCommitIndex uint64,

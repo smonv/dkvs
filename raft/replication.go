@@ -27,12 +27,6 @@ func (f *follower) LastContact() time.Time {
 	return f.lastContact
 }
 
-func (f *follower) setLastContact() {
-	f.lastContactLock.Lock()
-	defer f.lastContactLock.Unlock()
-	f.lastContact = time.Now()
-}
-
 func (s *Server) replicate(f *follower) {
 	stopHeartbeat := make(chan struct{})
 	defer close(stopHeartbeat)
@@ -98,7 +92,6 @@ func (s *Server) replicateTo(f *follower) {
 		s.debug("AppendEntries to %v rejected, sending older logs (next :%d)", f.peer, f.nextIndex)
 		s.replicateTo(f)
 	}
-	return
 }
 
 func (s *Server) heartbeat(f *follower, stopCh chan struct{}) {

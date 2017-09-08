@@ -46,6 +46,6 @@ func main() {
 		r.HandleFunc("/append_entries", transport.AppendEntriesHandle(consumer)).Methods("POST")
 		r.HandleFunc("/store/{key}", transport.GetHandle(server)).Methods("GET")
 		r.HandleFunc("/store/{key}", transport.SetHandle(server)).Methods("POST")
-		http.ListenAndServe(addr, r)
+		_ = http.ListenAndServe(addr, r)
 	}
 }

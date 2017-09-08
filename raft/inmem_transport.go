@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// InmemTransport ...
 type InmemTransport struct {
 	sync.RWMutex
 	consumerCh chan RPC
@@ -15,10 +16,12 @@ type InmemTransport struct {
 	timeout    time.Duration
 }
 
+// NewInmemAddr ...
 func NewInmemAddr() string {
 	return generateUUID()
 }
 
+// NewInmemTransport ...
 func NewInmemTransport(addr string) *InmemTransport {
 	if addr == "" {
 		addr = NewInmemAddr()
@@ -33,20 +36,24 @@ func NewInmemTransport(addr string) *InmemTransport {
 
 }
 
+// AddPeer ...
 func (i *InmemTransport) AddPeer(peer *InmemTransport) {
 	i.Lock()
 	defer i.Unlock()
 	i.peers[peer.LocalAddr()] = peer
 }
 
+// Consumer ...
 func (i *InmemTransport) Consumer() <-chan RPC {
 	return i.consumerCh
 }
 
+// LocalAddr ...
 func (i *InmemTransport) LocalAddr() string {
 	return i.localAddr
 }
 
+// RequestVote ...
 func (i *InmemTransport) RequestVote(target string, req *RequestVoteRequest, resp *RequestVoteResponse) error {
 	rpcResp, err := i.sentRPC(target, req, i.timeout)
 	if err != nil {
@@ -59,6 +66,7 @@ func (i *InmemTransport) RequestVote(target string, req *RequestVoteRequest, res
 	return nil
 }
 
+// AppendEntries ...
 func (i *InmemTransport) AppendEntries(target string, req *AppendEntryRequest, resp *AppendEntryResponse) error {
 	rpcResp, err := i.sentRPC(target, req, i.timeout)
 	if err != nil {

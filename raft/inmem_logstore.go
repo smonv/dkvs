@@ -25,6 +25,7 @@ func (i *InmemLogStore) FirstIndex() (uint64, error) {
 	return i.entries[0].Index, nil
 }
 
+// LastIndex ...
 func (i *InmemLogStore) LastIndex() (uint64, error) {
 	i.Lock()
 	defer i.Unlock()
@@ -36,6 +37,7 @@ func (i *InmemLogStore) LastIndex() (uint64, error) {
 	return 0, nil
 }
 
+// GetLog ...
 func (i *InmemLogStore) GetLog(idx uint64) (*Log, error) {
 	i.Lock()
 	defer i.Unlock()
@@ -47,6 +49,7 @@ func (i *InmemLogStore) GetLog(idx uint64) (*Log, error) {
 	return nil, fmt.Errorf("Can't get log with index %d", idx)
 }
 
+// SetLog ...
 func (i *InmemLogStore) SetLog(entry *Log) error {
 	i.Lock()
 	defer i.Unlock()

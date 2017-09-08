@@ -11,17 +11,20 @@ import (
 	"github.com/tthanh/dkvs/raft"
 )
 
+// KeyValue ...
 type KeyValue struct {
 	Key   string `json:"key"`
 	Value string `json:"value"`
 }
 
+// HTTPTransport ...
 type HTTPTransport struct {
 	consumer  <-chan raft.RPC
 	localAddr string
 	client    *http.Client
 }
 
+// NewHTTPTransport ...
 func NewHTTPTransport(addr string, consumer <-chan raft.RPC) *HTTPTransport {
 	return &HTTPTransport{
 		consumer:  consumer,
@@ -32,10 +35,12 @@ func NewHTTPTransport(addr string, consumer <-chan raft.RPC) *HTTPTransport {
 	}
 }
 
+// Consumer ...
 func (t *HTTPTransport) Consumer() <-chan raft.RPC {
 	return t.consumer
 }
 
+// LocalAddr ...
 func (t *HTTPTransport) LocalAddr() string {
 	return t.localAddr
 }
@@ -63,13 +68,15 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	}
 
 	body, _ := ioutil.ReadAll(response.Body)
-	response.Body.Close()
 
-	json.Unmarshal(body, &resp)
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
-	return nil
+	return json.Unmarshal(body, &resp)
 }
 
+// RequestVoteHandle ...
 func (t *HTTPTransport) RequestVoteHandle(consumer chan raft.RPC) http.HandlerFunc {
 	return t.requestVoteHandle(consumer)
 }
@@ -128,12 +135,14 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 		return err
 	}
 	body, _ := ioutil.ReadAll(response.Body)
-	response.Body.Close()
+	defer func() {
+		_ = response.Body.Close()
+	}()
 
-	json.Unmarshal(body, &resp)
-	return nil
+	return json.Unmarshal(body, &resp)
 }
 
+// AppendEntriesHandle ...
 func (t *HTTPTransport) AppendEntriesHandle(consumer chan raft.RPC) http.HandlerFunc {
 	return t.appendEntriesHandle(consumer)
 }
@@ -161,17 +170,21 @@ func (t *HTTPTransport) appendEntriesHandle(consumer chan raft.RPC) http.Handler
 
 		consumer <- rpc
 
-		select {
-		case resp := <-respCh:
+		for resp := range respCh {
+
 			data, err := json.Marshal(resp.Response.(*raft.AppendEntryResponse))
 			if err != nil {
-				w.WriteHeader(http.StatusBadRequest)
+				w.WriteHeader(http.StatusInternalServerError)
 			}
-			w.Write(data)
+			_, err = w.Write(data)
+			if err != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 		}
 	}
 }
 
+// GetHandle ...
 func (t *HTTPTransport) GetHandle(server *raft.Server) http.HandlerFunc {
 	return t.getHandle(server)
 }
@@ -187,10 +200,14 @@ func (t *HTTPTransport) getHandle(server *raft.Server) http.HandlerFunc {
 		} else {
 			value = server.Leader()
 		}
-		w.Write([]byte(value.(string)))
+		_, err := w.Write([]byte(value.(string)))
+		if err != nil {
+			w.WriteHeader(http.StatusInternalServerError)
+		}
 	}
 }
 
+// SetHandle ...
 func (t *HTTPTransport) SetHandle(server *raft.Server) http.HandlerFunc {
 	return t.setHandle(server)
 }
@@ -219,7 +236,10 @@ func (t *HTTPTransport) setHandle(server *raft.Server) http.HandlerFunc {
 
 		err = server.Do(command)
 		if err != nil {
-			w.Write([]byte(err.Error()))
+			_, sErr := w.Write([]byte(err.Error()))
+			if sErr != nil {
+				w.WriteHeader(http.StatusInternalServerError)
+			}
 		}
 	}
 }
