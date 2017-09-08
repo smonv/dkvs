@@ -1,4 +1,4 @@
-package main
+package dkvs
 
 import (
 	"bytes"
@@ -45,6 +45,9 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	url := "http://" + target + "/request_vote"
 
 	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 	request.Header.Set("Content-Type", "application/json")
@@ -65,6 +68,10 @@ func (t *HTTPTransport) RequestVote(target string, req *raft.RequestVoteRequest,
 	json.Unmarshal(body, &resp)
 
 	return nil
+}
+
+func (t *HTTPTransport) RequestVoteHandle(consumer chan raft.RPC) http.HandlerFunc {
+	return t.requestVoteHandle(consumer)
 }
 
 func (t *HTTPTransport) requestVoteHandle(consumer chan raft.RPC) http.HandlerFunc {
@@ -90,13 +97,12 @@ func (t *HTTPTransport) requestVoteHandle(consumer chan raft.RPC) http.HandlerFu
 
 		consumer <- rpc
 
-		select {
-		case resp := <-respCh:
+		for resp := range respCh {
 			data, err := json.Marshal(resp.Response.(*raft.RequestVoteResponse))
 			if err != nil {
 				w.WriteHeader(http.StatusBadRequest)
 			}
-			w.Write(data)
+			_, _ = w.Write(data)
 		}
 	}
 }
@@ -106,6 +112,9 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 	url := "http://" + target + "/append_entries"
 
 	data, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
 
 	request, err := http.NewRequest("POST", url, bytes.NewBuffer(data))
 	request.Header.Set("Content-Type", "application/json")
@@ -123,6 +132,10 @@ func (t *HTTPTransport) AppendEntries(target string, req *raft.AppendEntryReques
 
 	json.Unmarshal(body, &resp)
 	return nil
+}
+
+func (t *HTTPTransport) AppendEntriesHandle(consumer chan raft.RPC) http.HandlerFunc {
+	return t.appendEntriesHandle(consumer)
 }
 
 func (t *HTTPTransport) appendEntriesHandle(consumer chan raft.RPC) http.HandlerFunc {
@@ -159,6 +172,10 @@ func (t *HTTPTransport) appendEntriesHandle(consumer chan raft.RPC) http.Handler
 	}
 }
 
+func (t *HTTPTransport) GetHandle(server *raft.Server) http.HandlerFunc {
+	return t.getHandle(server)
+}
+
 func (t *HTTPTransport) getHandle(server *raft.Server) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		vars := mux.Vars(r)
@@ -172,6 +189,10 @@ func (t *HTTPTransport) getHandle(server *raft.Server) http.HandlerFunc {
 		}
 		w.Write([]byte(value.(string)))
 	}
+}
+
+func (t *HTTPTransport) SetHandle(server *raft.Server) http.HandlerFunc {
+	return t.setHandle(server)
 }
 
 func (t *HTTPTransport) setHandle(server *raft.Server) http.HandlerFunc {

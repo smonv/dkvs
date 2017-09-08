@@ -1,4 +1,4 @@
-package main
+package dkvs
 
 import "encoding/json"
 import "sync"

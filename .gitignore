@@ -23,5 +23,6 @@ _testmain.go
 *.test
 *.prof
 
-**/dkvs
-**/dkvsc
+dkvs
+dkvsc
+vendor/

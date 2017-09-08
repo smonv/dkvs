@@ -5,17 +5,20 @@ import (
 	"sync"
 )
 
+// InmemLogStore ...
 type InmemLogStore struct {
 	sync.Mutex
 	entries []*Log
 }
 
+// NewInmemLogStore ...
 func NewInmemLogStore() *InmemLogStore {
 	return &InmemLogStore{
 		entries: []*Log{},
 	}
 }
 
+// FirstIndex ...
 func (i *InmemLogStore) FirstIndex() (uint64, error) {
 	i.Lock()
 	defer i.Unlock()
@@ -51,15 +54,15 @@ func (i *InmemLogStore) SetLog(entry *Log) error {
 	return nil
 }
 
+// SetLogs ...
 func (i *InmemLogStore) SetLogs(entries []*Log) error {
 	i.Lock()
 	defer i.Unlock()
-	for _, entry := range entries {
-		i.entries = append(i.entries, entry)
-	}
+	i.entries = append(i.entries, entries...)
 	return nil
 }
 
+// DeleteRange ...
 func (i *InmemLogStore) DeleteRange(min, max uint64) error {
 	i.Lock()
 	defer i.Unlock()

@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gorilla/mux"
+	"github.com/tthanh/dkvs"
 	"github.com/tthanh/dkvs/raft"
 )
 
@@ -28,9 +29,9 @@ func main() {
 	if new {
 		consumer = make(chan raft.RPC)
 		config := raft.DefaultConfig()
-		transport := NewHTTPTransport(addr, consumer)
+		transport := dkvs.NewHTTPTransport(addr, consumer)
 		ls := raft.NewInmemLogStore()
-		sm := NewStateMachine()
+		sm := dkvs.NewStateMachine()
 		server = raft.NewServer(config, transport, ls, sm)
 		if len(join) > 0 {
 			peers := strings.Split(join, ",")
@@ -41,10 +42,10 @@ func main() {
 		server.Start()
 		defer server.Stop()
 
-		r.HandleFunc("/request_vote", transport.requestVoteHandle(consumer)).Methods("POST")
-		r.HandleFunc("/append_entries", transport.appendEntriesHandle(consumer)).Methods("POST")
-		r.HandleFunc("/store/{key}", transport.getHandle(server)).Methods("GET")
-		r.HandleFunc("/store/{key}", transport.setHandle(server)).Methods("POST")
+		r.HandleFunc("/request_vote", transport.RequestVoteHandle(consumer)).Methods("POST")
+		r.HandleFunc("/append_entries", transport.AppendEntriesHandle(consumer)).Methods("POST")
+		r.HandleFunc("/store/{key}", transport.GetHandle(server)).Methods("GET")
+		r.HandleFunc("/store/{key}", transport.SetHandle(server)).Methods("POST")
 		http.ListenAndServe(addr, r)
 	}
 }

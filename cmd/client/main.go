@@ -1,4 +1,4 @@
-package main
+package client
 
 import (
 	"bytes"
@@ -77,10 +77,9 @@ func setValue(servers []string, key string, value string) {
 	url := fmt.Sprintf("http://%s/store/%s", target, key)
 
 	client := newClient()
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer([]byte(value)))
+	req, _ := http.NewRequest("POST", url, bytes.NewBuffer([]byte(value)))
 
 	resp, err := client.Do(req)
-
 	if err != nil {
 		setValue(servers, key, value)
 	} else {
@@ -107,7 +106,7 @@ func getValue(servers []string, key string) string {
 	url := fmt.Sprintf("http://%s/store/%s", target, key)
 	client := newClient()
 
-	req, err := http.NewRequest("GET", url, nil)
+	req, _ := http.NewRequest("GET", url, nil)
 
 	resp, err := client.Do(req)
 

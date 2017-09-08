@@ -58,7 +58,12 @@ type AppendEntryResponse struct {
 	Success      bool   `json:"success"`
 }
 
-func newAppendEntriesRequest(term uint64, prevLogIndex uint64, prevLogTerm uint64, entries []*Log, leader string, leaderCommitIndex uint64) *AppendEntryRequest {
+func newAppendEntriesRequest(
+	term, prevLogIndex , prevLogTerm uint64,
+	entries []*Log,
+	leader string,
+	leaderCommitIndex uint64,
+) *AppendEntryRequest {
 	return &AppendEntryRequest{
 		Term:              term,
 		PrevLogIndex:      prevLogIndex,
