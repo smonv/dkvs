@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	uuid "github.com/satori/go.uuid"
+	"github.com/gofrs/uuid/v3"
 )
 
 // InmemTransport ...
@@ -20,7 +20,8 @@ type InmemTransport struct {
 
 // NewInmemAddr ...
 func NewInmemAddr() string {
-	return uuid.NewV4().String()
+	u, _ := uuid.NewV4()
+	return u.String()
 }
 
 // NewInmemTransport ...
