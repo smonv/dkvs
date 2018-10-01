@@ -5,9 +5,10 @@ import (
 	"net/http"
 	"strings"
 
+	"dkvs"
+	"dkvs/raft"
+
 	"github.com/gorilla/mux"
-	"github.com/tthanh/dkvs"
-	"github.com/tthanh/dkvs/raft"
 )
 
 var consumer chan raft.RPC

@@ -7,8 +7,9 @@ import (
 	"net/http"
 	"time"
 
+	"dkvs/raft"
+
 	"github.com/gorilla/mux"
-	"github.com/tthanh/dkvs/raft"
 )
 
 // KeyValue ...
